@@ -90,7 +90,7 @@ public:
     void setPositionText(const Base::Vector2D &Pos);
     void resetPositionText(void);
     void renderSuggestConstraintsCursor(std::vector<AutoConstraint> &suggestedConstraints);
-
+    virtual void registerPressedKey(bool pressed, int key){};
 protected:
     // helpers
     void setCursor( const QPixmap &p,int x,int y );
