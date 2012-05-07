@@ -27,6 +27,7 @@
 # include <TopoDS.hxx>
 # include <TopoDS_Face.hxx>
 # include <TopoDS_Shell.hxx>
+# include <BRepBuilderAPI_MakeWire.hxx>
 #endif
 
 
@@ -59,28 +60,48 @@ void RuledSurface::onChanged(const App::Property* prop)
 
 App::DocumentObjectExecReturn *RuledSurface::execute(void)
 {
-    App::DocumentObject* c1 = Curve1.getValue();
-    if (!(c1 && c1->getTypeId().isDerivedFrom(Part::Feature::getClassTypeId())))
-        return new App::DocumentObjectExecReturn("No shape linked.");
-    const std::vector<std::string>& element1 = Curve1.getSubValues();
-    if (element1.size() != 1)
-        return new App::DocumentObjectExecReturn("Not exactly one sub-shape linked.");
-    App::DocumentObject* c2 = Curve2.getValue();
-    if (!(c2 && c2->getTypeId().isDerivedFrom(Part::Feature::getClassTypeId())))
-        return new App::DocumentObjectExecReturn("No shape linked.");
-    const std::vector<std::string>& element2 = Curve2.getSubValues();
-    if (element2.size() != 1)
-        return new App::DocumentObjectExecReturn("Not exactly one sub-shape linked.");
-
-    const Part::TopoShape& shape1 = static_cast<Part::Feature*>(c1)->Shape.getValue();
-    TopoDS_Shape curve1 = shape1.getSubShape(element1[0].c_str());
-    if (curve1.IsNull()) curve1 = shape1._Shape;
-
-    const Part::TopoShape& shape2 = static_cast<Part::Feature*>(c2)->Shape.getValue();
-    TopoDS_Shape curve2 = shape2.getSubShape(element2[0].c_str());
-    if (curve2.IsNull()) curve2 = shape2._Shape;
-
     try {
+        App::DocumentObject* c1 = Curve1.getValue();
+        if (!(c1 && c1->getTypeId().isDerivedFrom(Part::Feature::getClassTypeId())))
+            return new App::DocumentObjectExecReturn("No shape linked.");
+        const std::vector<std::string>& element1 = Curve1.getSubValues();
+        if (element1.size() != 1)
+            return new App::DocumentObjectExecReturn("Not exactly one sub-shape linked.");
+        App::DocumentObject* c2 = Curve2.getValue();
+        if (!(c2 && c2->getTypeId().isDerivedFrom(Part::Feature::getClassTypeId())))
+            return new App::DocumentObjectExecReturn("No shape linked.");
+        const std::vector<std::string>& element2 = Curve2.getSubValues();
+        if (element2.size() != 1)
+            return new App::DocumentObjectExecReturn("Not exactly one sub-shape linked.");
+
+        TopoDS_Shape curve1;
+        const Part::TopoShape& shape1 = static_cast<Part::Feature*>(c1)->Shape.getValue();
+        if (!shape1._Shape.IsNull()) {
+            if (!element1[0].empty()) {
+                curve1 = shape1.getSubShape(element1[0].c_str());
+            }
+            else {
+                if (shape1._Shape.ShapeType() == TopAbs_EDGE)
+                    curve1 = shape1._Shape;
+                else if (shape1._Shape.ShapeType() == TopAbs_WIRE)
+                    curve1 = shape1._Shape;
+            }
+        }
+
+        TopoDS_Shape curve2;
+        const Part::TopoShape& shape2 = static_cast<Part::Feature*>(c2)->Shape.getValue();
+        if (!shape2._Shape.IsNull()) {
+            if (!element2[0].empty()) {
+                curve2 = shape2.getSubShape(element2[0].c_str());
+            }
+            else {
+                if (shape2._Shape.ShapeType() == TopAbs_EDGE)
+                    curve2 = shape2._Shape;
+                else if (shape2._Shape.ShapeType() == TopAbs_WIRE)
+                    curve2 = shape2._Shape;
+            }
+        }
+
         if (curve1.IsNull() || curve2.IsNull())
             return new App::DocumentObjectExecReturn("Linked shapes are empty.");
         if (curve1.ShapeType() == TopAbs_EDGE && curve2.ShapeType() == TopAbs_EDGE) {
@@ -99,6 +120,9 @@ App::DocumentObjectExecReturn *RuledSurface::execute(void)
     catch (Standard_Failure) {
         Handle_Standard_Failure e = Standard_Failure::Caught();
         return new App::DocumentObjectExecReturn(e->GetMessageString());
+    }
+    catch (...) {
+        return new App::DocumentObjectExecReturn("General error in RuledSurface::execute()");
     }
 }
 
@@ -145,12 +169,19 @@ App::DocumentObjectExecReturn *Loft::execute(void)
             const TopoDS_Shape& shape = static_cast<Part::Feature*>(*it)->Shape.getValue();
             if (shape.IsNull())
                 return new App::DocumentObjectExecReturn("Linked shape is invalid.");
-            if (shape.ShapeType() == TopAbs_WIRE)
+            if (shape.ShapeType() == TopAbs_WIRE) {
                 profiles.Append(shape);
-            else if (shape.ShapeType() == TopAbs_VERTEX)
+            }
+            else if (shape.ShapeType() == TopAbs_EDGE) {
+                BRepBuilderAPI_MakeWire mkWire(TopoDS::Edge(shape));
+                profiles.Append(mkWire.Wire());
+            }
+            else if (shape.ShapeType() == TopAbs_VERTEX) {
                 profiles.Append(shape);
-            else
-                return new App::DocumentObjectExecReturn("Linked shape is neither a vertex nor a wire.");
+            }
+            else {
+                return new App::DocumentObjectExecReturn("Linked shape is not a vertex, edge nor wire.");
+            }
         }
 
         Standard_Boolean isSolid = Solid.getValue() ? Standard_True : Standard_False;

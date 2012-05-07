@@ -63,7 +63,7 @@ class Tracker:
     def _insertSwitch(self, switch):
         '''insert self.switch into the scene graph.  Must not be called
         from an event handler (or other scene graph traversal).'''
-        sg=FreeCADGui.ActiveDocument.ActiveView.getSceneGraph()
+        sg=Draft.get3DView().getSceneGraph()
         if self.ontop:
             sg.insertChild(switch,0)
         else:
@@ -72,7 +72,7 @@ class Tracker:
     def _removeSwitch(self, switch):
         '''remove self.switch from the scene graph.  As with _insertSwitch,
         must not be called during scene graph traversal).'''
-        sg=FreeCADGui.ActiveDocument.ActiveView.getSceneGraph()
+        sg=Draft.get3DView().getSceneGraph()
         sg.removeChild(switch)
 
     def on(self):
@@ -82,7 +82,7 @@ class Tracker:
     def off(self):
         self.switch.whichChild = -1
         self.Visible = False
-				
+
 class snapTracker(Tracker):
     "A Snap Mark tracker, used by tools that support snapping"
     def __init__(self):
@@ -451,8 +451,8 @@ class PlaneTracker(Tracker):
     "A working plane tracker"
     def __init__(self):
         # getting screen distance
-        p1 = FreeCADGui.ActiveDocument.ActiveView.getPoint((100,100))
-        p2 = FreeCADGui.ActiveDocument.ActiveView.getPoint((110,100))
+        p1 = Draft.get3DView().getPoint((100,100))
+        p2 = Draft.get3DView().getPoint((110,100))
         bl = (p2.sub(p1)).Length * (Draft.getParam("snapRange")/2)
         self.trans = coin.SoTransform()
         self.trans.translation.setValue([0,0,0])
@@ -535,22 +535,30 @@ class gridTracker(Tracker):
         bound = (self.numlines/2)*self.space
         pts = []
         mpts = []
+        apts = []
         for i in range(self.numlines+1):
             curr = -bound + i*self.space
             z = 0
             if i/float(self.mainlines) == i/self.mainlines:
-                mpts.extend([[-bound,curr,z],[bound,curr,z]])
-                mpts.extend([[curr,-bound,z],[curr,bound,z]])
+                if round(curr,4) == 0:
+                    apts.extend([[-bound,curr,z],[bound,curr,z]])
+                    apts.extend([[curr,-bound,z],[curr,bound,z]])
+                else:
+                    mpts.extend([[-bound,curr,z],[bound,curr,z]])
+                    mpts.extend([[curr,-bound,z],[curr,bound,z]])
             else:
                 pts.extend([[-bound,curr,z],[bound,curr,z]])
                 pts.extend([[curr,-bound,z],[curr,bound,z]])
         idx = []
         midx = []
+        aidx = []
         for p in range(0,len(pts),2):
             idx.append(2)
         for mp in range(0,len(mpts),2):
             midx.append(2)
-
+        for ap in range(0,len(apts),2):
+            aidx.append(2)
+            
         mat1 = coin.SoMaterial()
         mat1.transparency.setValue(0.7)
         mat1.diffuseColor.setValue(col)
@@ -565,6 +573,13 @@ class gridTracker(Tracker):
         self.coords2.point.setValues(mpts)
         lines2 = coin.SoLineSet()
         lines2.numVertices.setValues(midx)
+        mat3 = coin.SoMaterial()
+        mat3.transparency.setValue(0)
+        mat3.diffuseColor.setValue(col)
+        self.coords3 = coin.SoCoordinate3()
+        self.coords3.point.setValues(apts)
+        lines3 = coin.SoLineSet()
+        lines3.numVertices.setValues(aidx)
         s = coin.SoSeparator()
         s.addChild(self.trans)
         s.addChild(mat1)
@@ -573,6 +588,9 @@ class gridTracker(Tracker):
         s.addChild(mat2)
         s.addChild(self.coords2)
         s.addChild(lines2)
+        s.addChild(mat3)
+        s.addChild(self.coords3)
+        s.addChild(lines3)
         Tracker.__init__(self,children=[s])
         self.update()
 

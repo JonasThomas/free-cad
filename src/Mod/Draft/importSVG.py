@@ -40,6 +40,7 @@ currently unsupported: use, image
 
 import xml.sax, string, FreeCAD, os, math, re, Draft
 from draftlibs import fcvec
+from draftlibs import fcgeo
 from FreeCAD import Vector
 
 try: import FreeCADGui
@@ -217,7 +218,7 @@ def getcolor(color):
 				b = float(v[2]/255.0)
 				return (r,g,b,0.0)
 
-def getsize(length,mode='discard',base=None):
+def getsize(length,mode='discard',base=1):
         """parses length values containing number and unit
         with mode 'discard': extracts a number from the given string (removes unit suffixes)
         with mode 'tuple': return number and unit as a tuple
@@ -254,13 +255,15 @@ def getsize(length,mode='discard',base=None):
                 return float(number)
         elif mode == 'tuple':
                 return float(number),unit
+        elif mode == 'isabsolute':
+                return unit in ('mm','cm','in','px','pt')
         elif mode == 'mm':
                 return float(number)*tomm[unit]
         elif mode == 'css':
                 if unit != '%':
                         return float(number)*topx[unit]
                 else:
-                        return float(number)*(base or 1)
+                        return float(number)*base
 
 def makewire(path,checkclosed=False,donttry=False):
         '''try to make a wire out of the list of edges. If the 'Wire' functions fails or the wire is not
@@ -268,7 +271,8 @@ def makewire(path,checkclosed=False,donttry=False):
         #ToDo Do not catch all exceptions
         if not donttry:
                 try:
-                        sh = Part.Wire(path)
+			sh = Part.Wire(fcgeo.sortEdges(path))
+                        #sh = Part.Wire(path)
                         isok = (not checkclosed) or sh.isClosed()
                 except:# BRep_API:command not done
                         isok = False
@@ -429,23 +433,39 @@ class svgHandler(xml.sax.ContentHandler):
                 if name == 'svg':
                         m=FreeCAD.Matrix()
                         if 'width' in data and 'height' in data and \
-                                'viewBox' in data:
-                                x0,y0,x1,y1=[float(n) for n in data['viewBox']]
-                                vbw = x1-x0
-                                vbh = y1-y0
+                            'viewBox' in data and\
+                            (getsize(attrs.getValue('width'),'isabsolute') and\
+                            getsize(attrs.getValue('height'),'isabsolute') or\
+                            len(self.grouptransform)!=0):
+                                vbw=float(data['viewBox'][2])
+                                vbh=float(data['viewBox'][3])
+                                w=attrs.getValue('width')
+                                h=attrs.getValue('height')
                                 self.viewbox=(vbw,vbh)
-                                abw = getsize(attrs.getValue('width'),'mm')
-                                abh = getsize(attrs.getValue('height'),'mm')
+                                if len(self.grouptransform)==0:
+                                    unitmode='mm'
+                                else: #nested svg element
+                                    unitmode='css'
+                                abw = getsize(w,unitmode)
+                                abh = getsize(h,unitmode)
                                 sx=abw/vbw
                                 sy=abh/vbh
-                                m.scale(Vector(sx,sy,1))
-                                if round(sx/sy,5) != 1:
-                                        FreeCAD.Console.PrintWarning('Scaling Factors do not match!!!\n')
-
-                                #FreeCAD.Console.PrintMessage('attrs: %s %s\n'%(attrs.getValue('width'),attrs.getValue('height')))
-                                #FreeCAD.Console.PrintMessage('vb: %f %f %f %f\n'%(x0,y0,x1,y1))
-                                #FreeCAD.Console.PrintMessage('absolute: %f %f\n'%(abw,abh))
-                        else:
+                                preservearstr=data.get('preserveAspectRatio',\
+                                        '').lower()
+                                uniformscaling = round(sx/sy,5) == 1
+                                if uniformscaling:
+                                    m.scale(Vector(sx,sy,1))
+                                else:
+                                    FreeCAD.Console.PrintWarning('Scaling Factors do not match!!!\n')
+                                    if preservearstr.startswith('none'):
+                                        m.scale(Vector(sx,sy,1))
+                                    else: #preserve the aspect ratio
+                                        if preservearstr.endswith('slice'):
+                                            sxy=max(sx,sy)
+                                        else:
+                                            sxy=min(sx,sy)
+                                        m.scale(Vector(sxy,sxy,1))
+                        elif len(self.grouptransform)==0:
                                 #fallback to 90 dpi
                                 m.scale(Vector(25.4/90.0,25.4/90.0,1))
                         self.grouptransform.append(m) 
@@ -505,9 +525,11 @@ class svgHandler(xml.sax.ContentHandler):
                                 self.lastdim = obj
                                 data['d']=[]
                         pathcommandsre=re.compile('\s*?([mMlLhHvVaAcCqQsStTzZ])\s*?([^mMlLhHvVaAcCqQsStTzZ]*)\s*?',re.DOTALL)
+                        pointsre=re.compile('([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)',re.DOTALL)
                         for d,pointsstr in pathcommandsre.findall(' '.join(data['d'])):
                                 relative = d.islower()
-                                pointlist = [float(str1) for str1 in pointsstr.replace(',',' ').split()]
+                                pointlist = [float(number) for number,exponent in pointsre.findall(pointsstr.replace(',',' '))]
+
                                 if (d == "M" or d == "m"):
                                         x = pointlist.pop(0)
                                         y = pointlist.pop(0)
@@ -716,7 +738,7 @@ class svgHandler(xml.sax.ContentHandler):
                                                 path.append(seg)
                                         if path: #the path should be closed by now
                                                 #sh=makewire(path,True)
-                                                sh=makewire(path,donttry=True)
+                                                sh=makewire(path,donttry=False)
                                                 if self.fill: sh = Part.Face(sh)
                                                 sh = self.applyTrans(sh)
                                                 obj = self.doc.addObject("Part::Feature",pathname)

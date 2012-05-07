@@ -642,8 +642,13 @@ void Document::RestoreDocFile(Base::Reader &reader)
         std::string sMsg = "SetCamera ";
         sMsg += ppReturn;
         if (strcmp(ppReturn, "") != 0) { // non-empty attribute
-            if (d->_pcAppWnd->sendHasMsgToActiveView("SetCamera"))
-                d->_pcAppWnd->sendMsgToActiveView(sMsg.c_str());
+            try {
+                if (d->_pcAppWnd->sendHasMsgToActiveView("SetCamera"))
+                    d->_pcAppWnd->sendMsgToActiveView(sMsg.c_str());
+            }
+            catch (const Base::Exception& e) {
+                Base::Console().Error("%s\n", e.what());
+            }
         }
     }
 
@@ -826,6 +831,7 @@ void Document::createView(const char* sType)
         .arg(QString::fromUtf8(name)).arg(d->_iWinCount++);
 
     view3D->setWindowTitle(title);
+    view3D->setWindowModified(this->isModified());
     view3D->setWindowIcon(QApplication::windowIcon());
     view3D->resize(400, 300);
     getMainWindow()->addWindow(view3D);
@@ -961,6 +967,19 @@ std::list<MDIView*> Document::getMDIViews() const
          it != d->baseViews.end(); ++it) {
         MDIView* view = dynamic_cast<MDIView*>(*it);
         if (view)
+            views.push_back(view);
+    }
+
+    return views;
+}
+
+std::list<MDIView*> Document::getMDIViewsOfType(const Base::Type& typeId) const
+{
+    std::list<MDIView*> views;
+    for (std::list<BaseView*>::const_iterator it = d->baseViews.begin();
+         it != d->baseViews.end(); ++it) {
+        MDIView* view = dynamic_cast<MDIView*>(*it);
+        if (view && view->isDerivedFrom(typeId))
             views.push_back(view);
     }
 

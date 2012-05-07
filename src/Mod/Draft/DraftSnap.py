@@ -71,8 +71,10 @@ class Snapper:
         self.grid = None
         self.constrainLine = None
         self.trackLine = None
+        self.snapInfo = None
         self.lastSnappedObject = None
         self.active = True
+        self.trackers = [[],[],[],[]] # view, grid, snap, extline
 
         self.polarAngles = [90,45]
         
@@ -131,6 +133,7 @@ class Snapper:
                 return point
 
         snaps = []
+        self.snapInfo = None
         
         # type conversion if needed
         if isinstance(screenpos,list):
@@ -142,12 +145,23 @@ class Snapper:
             return None
 
         # setup trackers if needed
-        if not self.tracker:
+        v = Draft.get3DView()
+        if v in self.trackers[0]:
+            i = self.trackers[0].index(v)
+            self.grid = self.trackers[1][i]
+            self.tracker = self.trackers[2][i]
+            self.extLine = self.trackers[3][i]
+        else:
+            if Draft.getParam("grid"):
+                self.grid = DraftTrackers.gridTracker()
+            else:
+                self.grid = None
             self.tracker = DraftTrackers.snapTracker()
-        if not self.extLine:
             self.extLine = DraftTrackers.lineTracker(dotted=True)
-        if (not self.grid) and Draft.getParam("grid"):
-            self.grid = DraftTrackers.gridTracker()
+            self.trackers[0].append(v)
+            self.trackers[1].append(self.grid)
+            self.trackers[2].append(self.tracker)
+            self.trackers[3].append(self.extLine)
 
         # getting current snap Radius
         if not self.radius:
@@ -174,7 +188,7 @@ class Snapper:
         point = self.getApparentPoint(screenpos[0],screenpos[1])
             
         # check if we snapped to something
-        info = FreeCADGui.ActiveDocument.ActiveView.getObjectInfo((screenpos[0],screenpos[1]))
+        self.snapInfo = Draft.get3DView().getObjectInfo((screenpos[0],screenpos[1]))
 
         # checking if parallel to one of the edges of the last objects or to a polar direction
 
@@ -183,7 +197,7 @@ class Snapper:
             point,eline = self.snapToPolar(point,lastpoint)
             point,eline = self.snapToExtensions(point,lastpoint,constrain,eline)
         
-        if not info:
+        if not self.snapInfo:
             
             # nothing has been snapped, check fro grid snap
             if active:
@@ -194,7 +208,7 @@ class Snapper:
 
             # we have an object to snap to
 
-            obj = FreeCAD.ActiveDocument.getObject(info['Object'])
+            obj = FreeCAD.ActiveDocument.getObject(self.snapInfo['Object'])
             if not obj:
                 return cstr(point)
 
@@ -207,12 +221,12 @@ class Snapper:
             if not active:
                 
                 # passive snapping
-                snaps = [self.snapToVertex(info)]
+                snaps = [self.snapToVertex(self.snapInfo)]
 
             else:
                 
                 # active snapping
-                comp = info['Component']
+                comp = self.snapInfo['Component']
 
                 if (Draft.getType(obj) == "Wall") and not oldActive:
                     edges = []
@@ -246,13 +260,13 @@ class Snapper:
 
                         elif "Vertex" in comp:
                             # directly snapped to a vertex
-                            snaps.append(self.snapToVertex(info,active=True))
+                            snaps.append(self.snapToVertex(self.snapInfo,active=True))
                         elif comp == '':
                             # workaround for the new view provider
-                            snaps.append(self.snapToVertex(info,active=True))
+                            snaps.append(self.snapToVertex(self.snapInfo,active=True))
                         else:
                             # all other cases (face, etc...) default to passive snap
-                            snapArray = [self.snapToVertex(info)]
+                            snapArray = [self.snapToVertex(self.snapInfo)]
                             
                 elif Draft.getType(obj) == "Dimension":
                     # for dimensions we snap to their 3 points
@@ -262,6 +276,9 @@ class Snapper:
                 elif Draft.getType(obj) == "Mesh":
                     # for meshes we only snap to vertices
                     snaps.extend(self.snapToEndpoints(obj.Mesh))
+                elif Draft.getType(obj) == "Points":
+                    # for points we only snap to points
+                    snaps.extend(self.snapToEndpoints(obj.Points))
 
             # updating last objects list
             if not self.lastObj[1]:
@@ -275,7 +292,7 @@ class Snapper:
 
             # calculating the nearest snap point
             shortest = 1000000000000000000
-            origin = Vector(info['x'],info['y'],info['z'])
+            origin = Vector(self.snapInfo['x'],self.snapInfo['y'],self.snapInfo['z'])
             winner = [Vector(0,0,0),None,Vector(0,0,0)]
             for snap in snaps:
                 # if snap[0] == None: print "debug: Snapper: 'i[0]' is 'None'"
@@ -289,7 +306,7 @@ class Snapper:
                 dv = point.sub(winner[2])
                 if (dv.Length > self.radius):
                     if (not oldActive) and self.isEnabled("passive"):
-                        winner = self.snapToVertex(info)
+                        winner = self.snapToVertex(self.snapInfo)
 
             # setting the cursors
             if self.tracker:
@@ -303,9 +320,13 @@ class Snapper:
 
     def getApparentPoint(self,x,y):
         "returns a 3D point, projected on the current working plane"
-        pt = FreeCADGui.ActiveDocument.ActiveView.getPoint(x,y)
-        dv = FreeCADGui.ActiveDocument.ActiveView.getViewDirection()
-        return FreeCAD.DraftWorkingPlane.projectPoint(pt,dv)
+        view = Draft.get3DView()
+        pt = view.getPoint(x,y)
+        if hasattr(FreeCAD,"DraftWorkingPlane"):
+            dv = view.getViewDirection()
+            return FreeCAD.DraftWorkingPlane.projectPoint(pt,dv)
+        else:
+            return pt
         
     def snapToExtensions(self,point,last,constrain,eline):
         "returns a point snapped to extension or parallel line to last object, if any"
@@ -367,9 +388,14 @@ class Snapper:
         if self.isEnabled('ortho'): 
             if last:
                 vecs = []
-                ax = [FreeCAD.DraftWorkingPlane.u,
-                       FreeCAD.DraftWorkingPlane.v,
-                       FreeCAD.DraftWorkingPlane.axis]
+                if hasattr(FreeCAD,"DraftWorkingPlane"):
+                    ax = [FreeCAD.DraftWorkingPlane.u,
+                           FreeCAD.DraftWorkingPlane.v,
+                           FreeCAD.DraftWorkingPlane.axis]
+                else:
+                    ax = [FreeCAD.Vector(1,0,0),
+                          FreeCAD.Vector(0,1,0),
+                          FreeCAD.Vector(0,0,1)]
                 for a in self.polarAngles:
                         if a == 90:
                             vecs.extend([ax[0],fcvec.neg(ax[0])])
@@ -418,8 +444,12 @@ class Snapper:
             elif hasattr(shape,"Point"):
                 snaps.append([shape.Point,'endpoint',shape.Point])
             elif hasattr(shape,"Points"):
-                for v in shape.Points:
-                    snaps.append([v.Vector,'endpoint',v.Vector])
+                if len(shape.Points) and hasattr(shape.Points[0],"Vector"):
+                    for v in shape.Points:
+                        snaps.append([v.Vector,'endpoint',v.Vector])
+                else:
+                    for v in shape.Points:
+                        snaps.append([v,'endpoint',v])
         return snaps
 
     def snapToMidpoint(self,shape):
@@ -559,8 +589,9 @@ class Snapper:
         
     def getScreenDist(self,dist,cursor):
         "returns a distance in 3D space from a screen pixels distance"
-        p1 = FreeCADGui.ActiveDocument.ActiveView.getPoint(cursor)
-        p2 = FreeCADGui.ActiveDocument.ActiveView.getPoint((cursor[0]+dist,cursor[1]))
+        view = Draft.get3DView()
+        p1 = view.getPoint(cursor)
+        p2 = view.getPoint((cursor[0]+dist,cursor[1]))
         return (p2.sub(p1)).Length
 
     def getPerpendicular(self,edge,pt):
@@ -597,7 +628,7 @@ class Snapper:
                 for v in self.views:
                     v.setCursor(cur)
                 self.cursorMode = mode
-    
+
     def off(self):
         "finishes snapping"
         if self.tracker:
@@ -605,7 +636,8 @@ class Snapper:
         if self.extLine:
             self.extLine.off()
         if self.grid:
-            self.grid.off()
+            if not Draft.getParam("alwaysShowGrid"):
+                self.grid.off()
         self.unconstrain()
         self.radius = 0
         self.setCursor()
@@ -619,6 +651,10 @@ class Snapper:
         Basepoint is the base point used to figure out from where the point
         must be constrained. If no basepoint is given, the current point is
         used as basepoint.'''
+
+        # without the Draft module fully loaded, no axes system!"
+        if not hasattr(FreeCAD,"DraftWorkingPlane"):
+            return point
 
         point = Vector(point)
 
@@ -702,8 +738,9 @@ class Snapper:
         import inspect
         
         self.pt = None
+        self.lastSnappedObject = None
         self.ui = FreeCADGui.draftToolBar
-        self.view = FreeCADGui.ActiveDocument.ActiveView
+        self.view = Draft.get3DView()
 
         # setting a track line if we got an existing point
         if last:
@@ -718,7 +755,8 @@ class Snapper:
             ctrl = event.wasCtrlDown()
             shift = event.wasShiftDown()
             self.pt = FreeCADGui.Snapper.snap(mousepos,lastpoint=last,active=ctrl,constrain=shift)
-            self.ui.displayPoint(self.pt,last,plane=FreeCAD.DraftWorkingPlane,mask=FreeCADGui.Snapper.affinity)
+            if hasattr(FreeCAD,"DraftWorkingPlane"):
+                self.ui.displayPoint(self.pt,last,plane=FreeCAD.DraftWorkingPlane,mask=FreeCADGui.Snapper.affinity)
             if self.trackLine:
                 self.trackLine.p2(self.pt)
             if movecallback:
@@ -726,7 +764,7 @@ class Snapper:
         
         def getcoords(point,relative=False):
             self.pt = point
-            if relative and last:
+            if relative and last and hasattr(FreeCAD,"DraftWorkingPlane"):
                 v = FreeCAD.DraftWorkingPlane.getGlobalCoords(point)
                 self.pt = last.add(v)
             accept()
@@ -795,10 +833,27 @@ class Snapper:
                 b.setChecked(True)
                 self.toolbar.addWidget(b)
                 self.toolbarButtons.append(b)
+                QtCore.QObject.connect(b,QtCore.SIGNAL("toggled(bool)"),self.saveSnapModes)
+        # restoring states 
+        t = Draft.getParam("snapModes")
+        if t:
+            c = 0
+            for b in [self.masterbutton]+self.toolbarButtons:
+                if len(t) > c:
+                    b.setChecked(bool(int(t[c])))
+                    c += 1
         if not Draft.getParam("showSnapBar"):
             self.toolbar.hide()
 
+    def saveSnapModes(self):
+        "saves the snap modes for next sessions"
+        t = ''
+        for b in [self.masterbutton]+self.toolbarButtons:
+            t += str(int(b.isChecked()))
+        Draft.setParam("snapModes",t)
+
     def toggle(self,checked=None):
+        "toggles the snap mode"
         if hasattr(self,"toolbarButtons"):
             if checked == None:
                 self.masterbutton.toggle()
@@ -812,6 +867,7 @@ class Snapper:
                 for i in range(len(self.toolbarButtons)):
                     self.savedButtonStates.append(self.toolbarButtons[i].isChecked())
                     self.toolbarButtons[i].setEnabled(False)
+        self.saveSnapModes()
 
     def isEnabled(self,but):
         "returns true if the given button is turned on"
@@ -830,5 +886,16 @@ class Snapper:
             mw.addToolBar(self.toolbar)
         self.toolbar.show()
 
+    def setGrid(self):
+        "sets the grid, if visible"
+        if self.grid:
+            if self.grid.Visible:
+                self.grid.set()
+
 if not hasattr(FreeCADGui,"Snapper"):
     FreeCADGui.Snapper = Snapper()
+if not hasattr(FreeCAD,"DraftWorkingPlane"):
+    import WorkingPlane, Draft_rc
+    FreeCAD.DraftWorkingPlane = WorkingPlane.plane()
+    print FreeCAD.DraftWorkingPlane
+    FreeCADGui.addIconPath(":/icons")

@@ -102,12 +102,13 @@ def getParamType(param):
                  "snapRange","gridEvery","linewidth","UiMode","modconstrain","modsnap",
                  "modalt"]:
         return "int"
-    elif param in ["constructiongroupname","textfont","patternFile","template","maxSnapEdges"]:
+    elif param in ["constructiongroupname","textfont","patternFile","template","maxSnapEdges",
+                   "snapModes"]:
         return "string"
     elif param in ["textheight","tolerance","gridSpacing"]:
         return "float"
     elif param in ["selectBaseObjects","alwaysSnap","grid","fillmode","saveonexit","maxSnap",
-                   "SvgLinesBlack","dxfStdSize","showSnapBar","hideSnapBar"]:
+                   "SvgLinesBlack","dxfStdSize","showSnapBar","hideSnapBar","alwaysShowGrid"]:
         return "bool"
     elif param in ["color","constructioncolor","snapcolor"]:
         return "unsigned"
@@ -166,9 +167,21 @@ def getType(obj):
         return "Annotation"
     if obj.isDerivedFrom("Mesh::Feature"):
         return "Mesh"
+    if obj.isDerivedFrom("Points::Feature"):
+        return "Points"
     if (obj.Type == "App::DocumentObjectGroup"):
         return "Group"
     return "Unknown"
+
+def get3DView():
+    "get3DView(): returns the current view if it is 3D, or the first 3D view found, or None"
+    v = FreeCADGui.ActiveDocument.ActiveView
+    if str(type(v)) == "<type 'View3DInventorPy'>":
+        return v
+    v = FreeCADGui.ActiveDocument.mdiViewsOfType("Gui::View3DInventor")
+    if v:
+        return v[0]
+    return None
 
 def isClone(obj,objtype):
     """isClone(obj,objtype): returns True if the given object is 
@@ -293,7 +306,7 @@ def formatObject(target,origin=None):
         else:
             matchrep = origin.ViewObject
             for p in matchrep.PropertiesList:
-                if not p in ["DisplayMode","BoundingBox","Proxy","RootNode"]:
+                if not p in ["DisplayMode","BoundingBox","Proxy","RootNode","Visibility"]:
                     if p in obrep.PropertiesList:
                         val = getattr(matchrep,p)
                         setattr(obrep,p,val)
@@ -438,13 +451,25 @@ def makeDimension(p1,p2,p3=None,p4=None):
     '''
     obj = FreeCAD.ActiveDocument.addObject("App::FeaturePython","Dimension")
     _Dimension(obj)
+    if gui:
+        _ViewProviderDimension(obj.ViewObject)
     if isinstance(p1,Vector) and isinstance(p2,Vector):
         obj.Start = p1
         obj.End = p2
+        if not p3:
+            p3 = p2.sub(p1)
+            p3.multiply(0.5)
+            p3 = p1.add(p3)
     elif isinstance(p2,int) and isinstance(p3,int):
         obj.Base = p1
-        obj.LinkedVertices = [p2,p3]
+        obj.LinkedVertices = idx = [p2,p3]
         p3 = p4
+        if not p3:
+            v1 = obj.Base.Shape.Vertexes[idx[0]].Point
+            v2 = obj.Base.Shape.Vertexes[idx[1]].Point
+            p3 = v2.sub(v1)
+            p3.multiply(0.5)
+            p3 = v1.add(p3)
     elif isinstance(p3,str):
         obj.Base = p1
         if p3 == "radius":
@@ -454,13 +479,10 @@ def makeDimension(p1,p2,p3=None,p4=None):
             obj.LinkedVertices = [p2,2,1]
             obj.ViewObject.Override = "ddim"
         p3 = p4
-    if not p3:
-        p3 = p2.sub(p1)
-        p3.multiply(0.5)
-        p3 = p1.add(p3)
+        if not p3:
+            p3 = obj.Base.Shape.Edges[0].Curve.Center.add(Vector(1,0,0))
     obj.Dimline = p3
     if gui:
-        _ViewProviderDimension(obj.ViewObject)
         formatObject(obj)
         select(obj)
     FreeCAD.ActiveDocument.recompute()
@@ -665,6 +687,12 @@ def makeCopy(obj,force=None,reparent=False):
         ArchCell._Cell(newobj)
         if gui:
             ArchCell._ViewProviderCell(newobj.ViewObject)
+    elif (getType(obj) == "Sketch") or (force == "Sketch"):
+        newobj = FreeCAD.ActiveDocument.addObject("Sketcher::SketchObject",getRealName(obj.Name))
+        for geo in obj.Geometries:
+            newobj.addGeometry(geo)
+        for con in obj.constraints:
+            newobj.addConstraint(con)
     elif obj.isDerivedFrom("Part::Feature"):
         newobj = FreeCAD.ActiveDocument.addObject("Part::Feature",getRealName(obj.Name))
         newobj.Shape = obj.Shape
@@ -747,15 +775,29 @@ def fuse(object1,object2):
     coplanar, a special Draft Wire is used, otherwise we use
     a standard Part fuse.'''
     from draftlibs import fcgeo
-    if fcgeo.isCoplanar(object1.Shape.fuse(object2.Shape).Faces):
+    import Part
+    # testing if we have holes:
+    holes = False
+    fshape = object1.Shape.fuse(object2.Shape)
+    fshape = fshape.removeSplitter()
+    for f in fshape.Faces:
+        if len(f.Wires) > 1:
+            holes = True
+    if fcgeo.isCoplanar(object1.Shape.fuse(object2.Shape).Faces) and not holes:
         obj = FreeCAD.ActiveDocument.addObject("Part::Part2DObjectPython","Fusion")
         _Wire(obj)
         if gui:
             _ViewProviderWire(obj.ViewObject)
+        obj.Base = object1
+        obj.Tool = object2
+    elif holes:
+        # temporary hack, since Part::Fuse objects don't remove splitters
+        obj = FreeCAD.ActiveDocument.addObject("Part::Feature","Fusion")
+        obj.Shape = fshape
     else:
         obj = FreeCAD.ActiveDocument.addObject("Part::Fuse","Fusion")
-    obj.Base = object1
-    obj.Tool = object2
+        obj.Base = object1
+        obj.Tool = object2
     if gui:
         object1.ViewObject.Visibility = False
         object2.ViewObject.Visibility = False
@@ -1151,26 +1193,25 @@ def draftify(objectslist,makeblock=False):
             return newobjlist[0]
         return newobjlist
 
-def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=None):
-    '''getSVG(object,[modifier],[textmodifier],[fillstyle],[direction]):
-    returns a string containing a SVG representation of the given object. the modifier attribute
-    specifies a scale factor for linewidths in %, and textmodifier specifies
-    a scale factor for texts, in % (both default = 100). You can also supply
-    an arbitrary projection vector.'''
+def getSVG(obj,scale=1,linewidth=0.35,fontsize=12,fillstyle="shape color",direction=None):
+    '''getSVG(object,[scale], [linewidth],[fontsize],[fillstyle],[direction]):
+    returns a string containing a SVG representation of the given object,
+    with the given linewidth and fontsize (used if the given object contains
+    any text). You can also supply an arbitrary projection vector. the
+    scale parameter allows to scale linewidths down, so they are resolution-independant.'''
     import Part
     from draftlibs import fcgeo
     svg = ""
-    tmod = ((textmodifier-100)/2)+100
-    if tmod == 0: tmod = 0.01
-    modifier = 200-modifier
-    if modifier == 0: modifier = 0.01
-    pmod = (200-textmodifier)/20
-    if pmod == 0: pmod = 0.01
+    linewidth = linewidth/scale
+    fontsize = (fontsize/scale)/2
     plane = None
     if direction:
-        if direction != Vector(0,0,0):
-            plane = WorkingPlane.plane()
-            plane.alignToPointAndAxis(Vector(0,0,0),fcvec.neg(direction),0)
+        if isinstance(direction,FreeCAD.Vector):
+            if direction != Vector(0,0,0):
+                plane = WorkingPlane.plane()
+                plane.alignToPointAndAxis(Vector(0,0,0),fcvec.neg(direction),0)
+        elif isinstance(direction,WorkingPlane.plane):
+            plane = direction
 
     def getLineStyle(obj):
         "returns a linestyle pattern for a given object"
@@ -1238,8 +1279,8 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
         if fill != 'none': svg += 'Z'
         svg += '" '
         svg += 'stroke="' + stroke + '" '
-        svg += 'stroke-width="' + str(width) + ' px" '
-        svg += 'style="stroke-width:'+ str(width)
+        svg += 'stroke-width="' + str(linewidth) + ' px" '
+        svg += 'style="stroke-width:'+ str(linewidth)
         svg += ';stroke-miterlimit:4'
         svg += ';stroke-dasharray:' + lstyle
         svg += ';fill:' + fill + '"'
@@ -1253,8 +1294,8 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
         svg += '" cy="' + str(cen.y)
         svg += '" r="' + str(rad)+'" '
         svg += 'stroke="' + stroke + '" '
-        svg += 'stroke-width="' + str(width) + ' px" '
-        svg += 'style="stroke-width:'+ str(width)
+        svg += 'stroke-width="' + str(linewidth) + ' px" '
+        svg += 'style="stroke-width:'+ str(linewidth)
         svg += ';stroke-miterlimit:4'
         svg += ';stroke-dasharray:' + lstyle
         svg += ';fill:' + fill + '"'
@@ -1298,35 +1339,36 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
             svg += 'L '+str(p4.x)+' '+str(p4.y)+'" '                        
         svg += 'fill="none" stroke="'
         svg += getrgb(obj.ViewObject.LineColor) + '" '
-        svg += 'stroke-width="' + str(obj.ViewObject.LineWidth/modifier) + ' px" '
-        svg += 'style="stroke-width:'+ str(obj.ViewObject.LineWidth/modifier)
+        svg += 'stroke-width="' + str(linewidth) + ' px" '
+        svg += 'style="stroke-width:'+ str(linewidth)
         svg += ';stroke-miterlimit:4;stroke-dasharray:none" '
         svg += 'freecad:basepoint1="'+str(p1.x)+' '+str(p1.y)+'" '
         svg += 'freecad:basepoint2="'+str(p4.x)+' '+str(p4.y)+'" '
         svg += 'freecad:dimpoint="'+str(p2.x)+' '+str(p2.y)+'"'
         svg += '/>\n'
         svg += '<circle cx="'+str(p2.x)+'" cy="'+str(p2.y)
-        svg += '" r="'+str(obj.ViewObject.FontSize/(pmod))+'" '
+        svg += '" r="'+str(fontsize)+'" '
         svg += 'fill="'+ getrgb(obj.ViewObject.LineColor) +'" stroke="none" '
         svg += 'style="stroke-miterlimit:4;stroke-dasharray:none" '
         svg += 'freecad:skip="1"'
         svg += '/>\n'
         svg += '<circle cx="'+str(p3.x)+'" cy="'+str(p3.y)
-        svg += '" r="'+str(obj.ViewObject.FontSize/(pmod))+'" '
+        svg += '" r="'+str(fontsize)+'" '
         svg += 'fill="#000000" stroke="none" '
         svg += 'style="stroke-miterlimit:4;stroke-dasharray:none" '
         svg += 'freecad:skip="1"'
         svg += '/>\n'
         svg += '<text id="' + obj.Name + '" fill="'
         svg += getrgb(obj.ViewObject.LineColor) +'" font-size="'
-        svg += str(obj.ViewObject.FontSize*(tmod/5))+'" '
+        svg += str(fontsize)+'" '
         svg += 'style="text-anchor:middle;text-align:center;'
         svg += 'font-family:'+obj.ViewObject.FontName+'" '
         svg += 'transform="rotate('+str(math.degrees(angle))
         svg += ','+ str(tbase.x) + ',' + str(tbase.y) + ') '
         svg += 'translate(' + str(tbase.x) + ',' + str(tbase.y) + ') '
-        svg += 'scale('+str(tmod/2000)+',-'+str(tmod/2000)+')" '
-        svg += 'freecad:skip="1"'
+        #svg += 'scale('+str(tmod/2000)+',-'+str(tmod/2000)+') '
+        svg += 'scale(1,-1) '
+        svg += '" freecad:skip="1"'
         svg += '>\n'
         svg += dimText % p3.sub(p2).Length
         svg += '</text>\n</g>\n'
@@ -1337,7 +1379,7 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
         svg = '<text id="' + obj.Name + '" fill="'
         svg += getrgb(obj.ViewObject.TextColor)
         svg += '" font-size="'
-        svg += str(obj.ViewObject.FontSize*(tmod/5))+'" '
+        svg += str(fontsize)+'" '
         svg += 'style="text-anchor:middle;text-align:center;'
         svg += 'font-family:'+obj.ViewObject.FontName+'" '
         svg += 'transform="'
@@ -1346,7 +1388,9 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
                 svg += 'rotate('+str(obj.ViewObject.Rotation)
                 svg += ','+ str(p.x) + ',' + str(p.y) + ') '
         svg += 'translate(' + str(p.x) + ',' + str(p.y) + ') '
-        svg +='scale('+str(tmod/2000)+','+str(-tmod/2000)+')">\n'
+        #svg +='scale('+str(tmod/2000)+','+str(-tmod/2000)+')'
+        svg += 'scale(1,-1) '
+        svg += '">\n'
         for l in obj.LabelText:
             svg += '<tspan>'+l+'</tspan>\n'
         svg += '</text>\n'
@@ -1357,7 +1401,6 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
         lorig = getLineStyle(obj)
         name = obj.Name
         stroke = getrgb(obj.ViewObject.LineColor)
-        width = obj.ViewObject.LineWidth/modifier
         fill = 'none'
         invpl = obj.Placement.inverse()
         n = 0
@@ -1401,7 +1444,6 @@ def getSVG(obj,modifier=100,textmodifier=100,fillstyle="shape color",direction=N
             stroke = "none"
         else:
             stroke = getrgb(obj.ViewObject.LineColor)
-        width = obj.ViewObject.LineWidth/modifier
         
         if len(obj.Shape.Vertexes) > 1:
             wiredEdges = []
@@ -1593,7 +1635,7 @@ def clone(obj,delta=None):
     cl.Label = "Clone of " + obj[0].Label
     _Clone(cl)
     if gui:
-        _ViewProviderDraftPart(cl.ViewObject)
+        _ViewProviderClone(cl.ViewObject)
         formatObject(cl,obj[0])
     cl.Objects = obj
     if delta:
@@ -1746,6 +1788,7 @@ class _ViewProviderDimension:
         obj.Proxy = self
         obj.FontSize=getParam("textheight")
         obj.FontName=getParam("textfont")
+        obj.DisplayMode = ["2D","3D"]
         obj.ExtLines=0.3
         obj.Override = ''
 
@@ -1772,13 +1815,14 @@ class _ViewProviderDimension:
             proj = ed.cross(Vector(0,0,1))
         if not proj: norm = Vector(0,0,1)
         else: norm = fcvec.neg(p3.sub(p2).cross(proj))
-        norm.normalize()
-        va = FreeCADGui.ActiveDocument.ActiveView.getViewDirection()
+        if not fcvec.isNull(norm):
+            norm.normalize()
+        va = get3DView().getViewDirection()
         if va.getAngle(norm) < math.pi/2:
             norm = fcvec.neg(norm)
         u = p3.sub(p2)
         u.normalize()
-        c = FreeCADGui.ActiveDocument.ActiveView.getCameraNode()
+        c = get3DView().getCameraNode()
         r = c.orientation.getValue()
         ru = Vector(r.multVec(coin.SbVec3f(1,0,0)).getValue())
         if ru.getAngle(u) > math.pi/2: u = fcvec.neg(u)
@@ -1799,6 +1843,7 @@ class _ViewProviderDimension:
         return p1,p2,p3,p4,tbase,norm,rot
 
     def attach(self, obj):
+        obj.DisplayMode = ["2D","3D"]
         self.Object = obj.Object
         p1,p2,p3,p4,tbase,norm,rot = self.calcGeom(obj.Object)
         self.color = coin.SoBaseColor()
@@ -1894,29 +1939,30 @@ class _ViewProviderDimension:
             text = text.replace("dim",dtext)
         else:
             text = dtext
-        self.text.string = self.text3d.string = text
-        self.textpos.rotation = coin.SbRotation(rot[0],rot[1],rot[2],rot[3])
-        self.textpos.translation.setValue([tbase.x,tbase.y,tbase.z])
-        if obj.ViewObject.DisplayMode == "2D":
-            self.coords.point.setValues([[p1.x,p1.y,p1.z],
-                                         [p2.x,p2.y,p2.z],
-                                         [p3.x,p3.y,p3.z],
-                                         [p4.x,p4.y,p4.z]])
-            self.line.numVertices.setValues([4])
-        else:
-            ts = (len(text)*obj.ViewObject.FontSize)/4
-            rm = ((p3.sub(p2)).Length/2)-ts
-            p2a = p2.add(fcvec.scaleTo(p3.sub(p2),rm))
-            p2b = p3.add(fcvec.scaleTo(p2.sub(p3),rm))
-            self.coords.point.setValues([[p1.x,p1.y,p1.z],
-                                         [p2.x,p2.y,p2.z],
-                                         [p2a.x,p2a.y,p2a.z],
-                                         [p2b.x,p2b.y,p2b.z],
-                                         [p3.x,p3.y,p3.z],
-                                         [p4.x,p4.y,p4.z]])
-            self.line.numVertices.setValues([3,3])
-        self.coord1.point.setValue((p2.x,p2.y,p2.z))
-        self.coord2.point.setValue((p3.x,p3.y,p3.z))
+        if hasattr(self,"text"):
+            self.text.string = self.text3d.string = text
+            self.textpos.rotation = coin.SbRotation(rot[0],rot[1],rot[2],rot[3])
+            self.textpos.translation.setValue([tbase.x,tbase.y,tbase.z])
+            if obj.ViewObject.DisplayMode == "2D":
+                self.coords.point.setValues([[p1.x,p1.y,p1.z],
+                                             [p2.x,p2.y,p2.z],
+                                             [p3.x,p3.y,p3.z],
+                                             [p4.x,p4.y,p4.z]])
+                self.line.numVertices.setValues([4])
+            else:
+                ts = (len(text)*obj.ViewObject.FontSize)/4
+                rm = ((p3.sub(p2)).Length/2)-ts
+                p2a = p2.add(fcvec.scaleTo(p3.sub(p2),rm))
+                p2b = p3.add(fcvec.scaleTo(p2.sub(p3),rm))
+                self.coords.point.setValues([[p1.x,p1.y,p1.z],
+                                             [p2.x,p2.y,p2.z],
+                                             [p2a.x,p2a.y,p2a.z],
+                                             [p2b.x,p2b.y,p2b.z],
+                                             [p3.x,p3.y,p3.z],
+                                             [p4.x,p4.y,p4.z]])
+                self.line.numVertices.setValues([3,3])
+            self.coord1.point.setValue((p2.x,p2.y,p2.z))
+            self.coord2.point.setValue((p3.x,p3.y,p3.z))
 
     def onChanged(self, vp, prop):
         if prop == "FontSize":
@@ -1933,9 +1979,7 @@ class _ViewProviderDimension:
             self.updateData(vp.Object, None)
 
     def getDisplayModes(self,obj):
-        modes=[]
-        modes.extend(["2D","3D"])
-        return modes
+        return ["2D","3D"]
 
     def getDefaultDisplayMode(self):
         return "2D"
@@ -2251,13 +2295,14 @@ class _Rectangle:
 
 class _ViewProviderRectangle(_ViewProviderDraft):
     "A View Provider for the Rectangle object"
-    def __init__(self, obj):
-        _ViewProviderDraft.__init__(self,obj)
-        obj.addProperty("App::PropertyFile","TextureImage",
+    def __init__(self, vobj):
+        _ViewProviderDraft.__init__(self,vobj)
+        vobj.addProperty("App::PropertyFile","TextureImage",
                         "Base","Uses an image as a texture map")
 
-    def attach(self,obj):
+    def attach(self,vobj):
         self.texture = None
+        self.Object = vobj.Object
 
     def onChanged(self, vp, prop):
         if prop == "TextureImage":
@@ -2490,19 +2535,18 @@ class _Polygon:
 
 class _DrawingView:
     def __init__(self, obj):
-        obj.addProperty("App::PropertyVector","Direction","Shape view","Projection direction")
-        obj.addProperty("App::PropertyFloat","LinewidthModifier","Drawing view","Modifies the linewidth of the lines inside this object")
-        obj.addProperty("App::PropertyFloat","TextModifier","Drawing view","Modifies the size of the texts inside this object")
+        obj.addProperty("App::PropertyVector","Direction","Shape View","Projection direction")
+        obj.addProperty("App::PropertyFloat","LineWidth","Drawing View","The width of the lines inside this object")
+        obj.addProperty("App::PropertyFloat","FontSize","Drawing View","The size of the texts inside this object")
         obj.addProperty("App::PropertyLink","Source","Base","The linked object")
-        obj.addProperty("App::PropertyEnumeration","FillStyle","Drawing view","Shape Fill Style")
+        obj.addProperty("App::PropertyEnumeration","FillStyle","Drawing View","Shape Fill Style")
         fills = ['shape color']
         for f in FreeCAD.svgpatterns.keys():
             fills.append(f)
         obj.FillStyle = fills
-
         obj.Proxy = self
-        obj.LinewidthModifier = 100
-        obj.TextModifier = 100
+        obj.LineWidth = 0.35
+        obj.FontSize = 12
         self.Type = "DrawingView"
 
     def execute(self, obj):
@@ -2510,12 +2554,12 @@ class _DrawingView:
             obj.ViewResult = self.updateSVG(obj)
 
     def onChanged(self, obj, prop):
-        if prop in ["X","Y","Scale","LinewidthModifier","TextModifier","FillStyle","Direction"]:
+        if prop in ["X","Y","Scale","LineWidth","FontSize","FillStyle","Direction"]:
             obj.ViewResult = self.updateSVG(obj)
 
     def updateSVG(self, obj):
         "encapsulates a svg fragment into a transformation node"
-        svg = getSVG(obj.Source,obj.LinewidthModifier,obj.TextModifier,obj.FillStyle,obj.Direction)
+        svg = getSVG(obj.Source,obj.Scale,obj.LineWidth,obj.FontSize,obj.FillStyle,obj.Direction)
         result = ''
         result += '<g id="' + obj.Name + '"'
         result += ' transform="'
@@ -2586,7 +2630,8 @@ class _ViewProviderBSpline(_ViewProviderDraft):
         if prop == "Points":
             if obj.Points:
                 p = obj.Points[-1]
-                self.coords.point.setValue((p.x,p.y,p.z))
+                if hasattr(self,"coords"):
+                    self.coords.point.setValue((p.x,p.y,p.z))
         return
 
     def onChanged(self, vp, prop):
@@ -2828,3 +2873,17 @@ class _ViewProviderDraftPart(_ViewProviderDraft):
     def claimChildren(self):
         return []
 
+class _ViewProviderClone(_ViewProviderDraft):
+    "a view provider that displays a Part icon instead of a Draft icon"
+    
+    def __init__(self,vobj):
+        _ViewProviderDraft.__init__(self,vobj)
+
+    def getIcon(self):
+        return ":/icons/Draft_Clone.svg"
+
+    def claimChildren(self):
+        return []
+    
+if not hasattr(FreeCADGui,"Snapper"):
+    import DraftSnap

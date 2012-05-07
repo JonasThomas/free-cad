@@ -96,7 +96,9 @@ OPTION(FREECAD_MAINTAINERS_BUILD "Build FreeCAD for Maintainers, with Docu and 3
 OPTION(FREECAD_BUILD_CAM "Build the FreeCAD CAM module and the needed libs, be aware, unfinished code!" OFF)
 OPTION(FREECAD_BUILD_FEM "Build the FreeCAD FEM module, be aware, unfinished code!" ON)
 OPTION(FREECAD_BUILD_SANDBOX "Build the FreeCAD Sandbox module which is only for testing purposes" OFF)
+OPTION(FREECAD_BUILD_TEMPLATE "Build the FreeCAD template module which is only for testing purposes" OFF)
 OPTION(FREECAD_BUILD_DEBIAN "Prepare for a build of a Debian package" OFF)
+OPTION(USE_EXTERNAL_ZIPIOS "Use system installed zipios++ instead of the bundled." OFF)
 
 # ==============================================================================
 
@@ -385,6 +387,10 @@ IF(MINGW)
 	SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -mthreads -Wl,--export-all-symbols")
 	LINK_LIBRARIES(-lgdi32)
 ENDIF(MINGW)
+# 0000661: cmake build on Mac OS: dealing with dylib versus so
+IF(APPLE)
+	SET(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
+ENDIF(APPLE)
 
 add_subdirectory(src)
 add_subdirectory(data)

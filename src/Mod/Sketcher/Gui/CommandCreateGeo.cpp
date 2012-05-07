@@ -1034,7 +1034,19 @@ public:
             }
 
 
+<<<<<<< HEAD
             else{
+=======
+                // setup for the next line segment
+                // Use updated endPoint as autoconstraints can modify the position
+                const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
+                if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
+                    const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
+                    EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
+                }
+                else
+                    EditCurve[0] = onSketchPos;
+>>>>>>> master
 
             Gui::Command::commitCommand();
             Gui::Command::updateActive();
@@ -1841,7 +1853,11 @@ CmdSketcherCreateFillet::CmdSketcherCreateFillet()
     sAppModule      = "Sketcher";
     sGroup          = QT_TR_NOOP("Sketcher");
     sMenuText       = QT_TR_NOOP("Create fillet");
+<<<<<<< HEAD
     sToolTipText    = QT_TR_NOOP("Create a fillet between two lines or at a coincident point");
+=======
+    sToolTipText    = QT_TR_NOOP("Create a fillet between two lines or at a coincidental point");
+>>>>>>> master
     sWhatsThis      = sToolTipText;
     sStatusTip      = sToolTipText;
     sPixmap         = "Sketcher_CreateFillet";

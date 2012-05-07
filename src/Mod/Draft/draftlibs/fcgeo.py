@@ -435,6 +435,15 @@ def getBoundary(shape):
 		if lut[e.hashCode()] == 1: bound.append(e)
 	return bound
 
+def isLine(bsp):
+        "returns True if the given BSpline curve is a straight line"
+        step = bsp.LastParameter/10
+        b = bsp.tangent(0)
+        for i in range(10):
+                if bsp.tangent(i*step) != b:
+                        return False
+        return True
+
 def sortEdges(lEdges, aVertex=None):
         "an alternative, more accurate version of Part.__sortEdges__"
 
@@ -479,6 +488,11 @@ def sortEdges(lEdges, aVertex=None):
                                         elif isinstance(result[3].Curve,Part.Circle):
                                                 mp = findMidpoint(result[3])
                                                 return [Part.Arc(aVertex.Point,mp,result[3].Vertexes[0].Point).toShape()]
+                                        elif isinstance(result[3].Curve,Part.BSplineCurve):
+                                                if isLine(result[3].Curve):
+                                                        return [Part.Line(aVertex.Point,result[3].Vertexes[0].Point).toShape()]
+                                                else:
+                                                        return lEdges
                                         else:
                                                 return lEdges
                                         
@@ -491,15 +505,20 @@ def sortEdges(lEdges, aVertex=None):
 					olEdges = sortEdges(lEdges, result[3].Vertexes[result[2]])
 					return olEdges
 		# if the wire is closed there is no end so choose 1st Vertex
+                #print "closed wire, starting from ",lEdges[0].Vertexes[0].Point
 		return sortEdges(lEdges, lEdges[0].Vertexes[0]) 
 	else :
+                #print "looking ",aVertex.Point
 		result = lookfor(aVertex,lEdges)
 		if result[0] != 0 :
 			del lEdges[result[1]]
 			next = sortEdges(lEdges, result[3].Vertexes[-((-result[2])^1)])
+                        #print "result ",result[3].Vertexes[0].Point,"    ",result[3].Vertexes[1].Point, " compared to ",aVertex.Point
                         if isSameVertex(aVertex,result[3].Vertexes[0]):
+                                #print "keeping"
                                 olEdges += [result[3]] + next
                         else:
+                                #print "inverting", result[3].Curve
                                 if isinstance(result[3].Curve,Part.Line):
                                         newedge = Part.Line(aVertex.Point,result[3].Vertexes[0].Point).toShape()
                                         olEdges += [newedge] + next
@@ -507,12 +526,71 @@ def sortEdges(lEdges, aVertex=None):
                                         mp = findMidpoint(result[3])
                                         newedge = Part.Arc(aVertex.Point,mp,result[3].Vertexes[0].Point).toShape()
                                         olEdges += [newedge] + next
+                                elif isinstance(result[3].Curve,Part.BSplineCurve):
+                                        if isLine(result[3].Curve):
+                                                newedge = Part.Line(aVertex.Point,result[3].Vertexes[0].Point).toShape()
+                                                olEdges += [newedge] + next
+                                        else:
+                                                olEdges += [result[3]] + next
                                 else:
                                         olEdges += [result[3]] + next                                        
 			return olEdges
 		else :
 			return []
 
+
+def findWires(edgeslist):
+        '''finds connected wires in the given list of edges'''
+
+        def touches(e1,e2):
+                if len(e1.Vertexes) < 2:
+                        return False
+                if len(e2.Vertexes) < 2:
+                        return False
+                if fcvec.equals(e1.Vertexes[0].Point,e2.Vertexes[0].Point):
+                        return True
+                if fcvec.equals(e1.Vertexes[0].Point,e2.Vertexes[-1].Point):
+                        return True
+                if fcvec.equals(e1.Vertexes[-1].Point,e2.Vertexes[0].Point):
+                        return True
+                if fcvec.equals(e1.Vertexes[-1].Point,e2.Vertexes[-1].Point):
+                        return True
+                return False
+        
+        edges = edgeslist[:]
+        wires = []
+        lost = []
+        while edges:
+                e = edges[0]
+                if not wires:
+                        # create first group
+                        edges.remove(e)
+                        wires.append([e])
+                else:
+                        found = False
+                        for w in wires:
+                                if not found:
+                                        for we in w:
+                                                if touches(e,we):
+                                                        edges.remove(e)
+                                                        w.append(e)
+                                                        found = True
+                                                        break
+                        if not found:
+                                if e in lost:
+                                        # we already tried this edge, and still nothing
+                                        edges.remove(e)
+                                        wires.append([e])
+                                        lost = []
+                                else:
+                                        # put to the end of the list
+                                        edges.remove(e)
+                                        edges.append(e)
+                                        lost.append(e)
+        nwires = []
+        for w in wires:
+                nwires.append(Part.Wire(w))
+        return nwires
                 
 def superWire(edgeslist,closed=False):
         '''superWire(edges,[closed]): forces a wire between edges that don't necessarily
@@ -704,8 +782,8 @@ def getNormal(shape):
                                         n = e1.cross(e2).normalize()
                                         break
         if FreeCAD.GuiUp:
-    		import FreeCADGui
-	        vdir = FreeCADGui.ActiveDocument.ActiveView.getViewDirection()
+    		import Draft
+	        vdir = Draft.get3DView().getViewDirection()
 	        if n.getAngle(vdir) < 0.78: n = fcvec.neg(n)
         return n
 
@@ -925,7 +1003,7 @@ def isPlanar(shape):
 			return False
 	return True
 
-def findWires(edges):
+def findWiresOld(edges):
         '''finds connected edges in the list, and returns a list of lists containing edges
         that can be connected'''
         def verts(shape):
@@ -1608,7 +1686,7 @@ def circlefrom1Line2Points(edge, p1, p2):
 	v1 = p1.sub(s)
 	v2 = p2.sub(s)
 	projectedDist = math.sqrt(abs(v1.dot(v2)))
-	edgeDir = vec(edge); edgeDir.normailze()
+	edgeDir = vec(edge); edgeDir.normalize()
 	projectedCen1 = Vector.add(s, fcvec.scale(edgeDir, projectedDist))
 	projectedCen2 = Vector.add(s, fcvec.scale(edgeDir, -projectedDist))
 	perpEdgeDir = edgeDir.cross(Vector(0,0,1))

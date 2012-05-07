@@ -54,9 +54,11 @@ namespace GCS
         std::map<Constraint *,VEC_pD > c2p; // constraint to parameter adjacency list
         std::map<double *,std::vector<Constraint *> > p2c; // parameter to constraint adjacency list
 
-        SubSystem *subsys0; // has the highest priority, always used as the primary subsystem
-        SubSystem *subsys1; // normally used as secondary subsystem, it is considered primary only if subsys0 is missing
-        SubSystem *subsys2; // has the lowest priority, always used as secondary system
+        // each row of subsyslist contains up to 3 subsystems.
+        // the first one has the highest priority, always used as the primary subsystem
+        // the second one is used as secondary subsystem
+        // the third one is used as secondary system and serves as a preconditioner
+        std::vector< std::vector<SubSystem *> > subsyslist;
         void clearSubSystems();
 
         MAP_pD_D reference;
@@ -87,7 +89,7 @@ namespace GCS
                                     double *difference, int tagId=0);
         int addConstraintP2PDistance(Point &p1, Point &p2, double *distance, int tagId=0);
         int addConstraintP2PAngle(Point &p1, Point &p2, double *angle,
-                                  double incr_angle, int tagId=0);
+                                  double incrAngle, int tagId=0);
         int addConstraintP2PAngle(Point &p1, Point &p2, double *angle, int tagId=0);
         int addConstraintP2LDistance(Point &p, Line &l, double *distance, int tagId=0);
         int addConstraintPointOnLine(Point &p, Line &l, int tagId=0);
@@ -152,13 +154,12 @@ namespace GCS
         int solve(SubSystem *subsys, bool isFine=true, Algorithm alg=DogLeg);
         int solve(SubSystem *subsysA, SubSystem *subsysB, bool isFine=true);
 
-        void getSubSystems(std::vector<SubSystem *> &subsysvec);
         void applySolution();
         void undoSolution();
 
         bool isInit() const { return init; }
 
-        int diagnose(VEC_pD &params, VEC_I &conflicting);
+        int diagnose(VEC_pD &params, VEC_I &conflictingTags);
     };
 
     ///////////////////////////////////////

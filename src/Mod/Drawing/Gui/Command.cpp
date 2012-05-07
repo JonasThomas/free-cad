@@ -354,6 +354,49 @@ bool CmdDrawingOpenBrowserView::isActive(void)
     return (getActiveGuiDocument() ? true : false);
 }
 
+//===========================================================================
+// Drawing_Annotation
+//===========================================================================
+
+DEF_STD_CMD_A(CmdDrawingAnnotation);
+
+CmdDrawingAnnotation::CmdDrawingAnnotation()
+  : Command("Drawing_Annotation")
+{
+    // seting the
+    sGroup        = QT_TR_NOOP("Drawing");
+    sMenuText     = QT_TR_NOOP("&Annotation");
+    sToolTipText  = QT_TR_NOOP("Inserts an Annotation view in the active document");
+    sWhatsThis    = "Drawing_Annotation";
+    sStatusTip    = QT_TR_NOOP("Inserts an Annotation view in the active document");
+    sPixmap       = "actions/drawing-annotation";
+}
+
+void CmdDrawingAnnotation::activated(int iMsg)
+{
+
+    std::vector<App::DocumentObject*> pages = this->getDocument()->getObjectsOfType(Drawing::FeaturePage::getClassTypeId());
+    if (pages.empty()){
+        QMessageBox::warning(Gui::getMainWindow(), QObject::tr("No page to insert"),
+            QObject::tr("Create a page to insert."));
+        return;
+    }
+    std::string PageName = pages.front()->getNameInDocument();
+    std::string FeatName = getUniqueObjectName("Annotation");
+    openCommand("Create Annotation");
+    doCommand(Doc,"App.activeDocument().addObject('Drawing::FeatureViewAnnotation','%s')",FeatName.c_str());
+    doCommand(Doc,"App.activeDocument().%s.X = 10.0",FeatName.c_str());
+    doCommand(Doc,"App.activeDocument().%s.Y = 10.0",FeatName.c_str());
+    doCommand(Doc,"App.activeDocument().%s.Scale = 7.0",FeatName.c_str());
+    doCommand(Doc,"App.activeDocument().%s.addObject(App.activeDocument().%s)",PageName.c_str(),FeatName.c_str());
+    updateActive();
+    commitCommand();
+}
+
+bool CmdDrawingAnnotation::isActive(void)
+{
+    return (getActiveGuiDocument() ? true : false);
+}
 
 //===========================================================================
 // Drawing_ExportPage
@@ -451,6 +494,7 @@ void CreateDrawingCommands(void)
     rcCmdMgr.addCommand(new CmdDrawingNewView());
     rcCmdMgr.addCommand(new CmdDrawingOrthoViews());
     rcCmdMgr.addCommand(new CmdDrawingOpenBrowserView());
+    rcCmdMgr.addCommand(new CmdDrawingAnnotation());
     rcCmdMgr.addCommand(new CmdDrawingExportPage());
     rcCmdMgr.addCommand(new CmdDrawingProjectShape());
 }

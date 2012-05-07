@@ -39,12 +39,18 @@ def addComponents(objectsList,host):
     if not isinstance(objectsList,list):
         objectsList = [objectsList]
     tp = Draft.getType(host)
-    if tp in ["Cell","Floor","Building","Site"]:
+    if tp in ["Cell"]:
         c = host.Components
         for o in objectsList:
             if not o in c:
                 c.append(o)
         host.Components = c
+    elif tp in ["Floor","Building","Site"]:
+        c = host.Group
+        for o in objectsList:
+            if not o in c:
+                c.append(o)
+        host.Group = c
     elif tp in ["Wall","Structure"]:
         a = host.Additions
         for o in objectsList:
@@ -73,6 +79,17 @@ def removeComponents(objectsList,host=None):
             for o in objectsList:
                 if not o in s:
                     s.append(o)
+                    if Draft.getType(o) == "Window":
+                        # fix for sketch-based windows
+                        if o.Base:
+                            if o.Base.Support:
+                                if isinstance(o.Base.Support,tuple):
+                                   if o.Base.Support[0].Name == host.Name:
+                                       print "removing sketch support to avoid cross-referencing"
+                                       o.Base.Support = None
+                                elif o.Base.Support.Name == host.Name:
+                                    print "removing sketch support to avoid cross-referencing"
+                                    o.Base.Support = None
             host.Subtractions = s
     else:
         for o in objectsList:
@@ -135,6 +152,59 @@ def splitMesh(obj,mark=True):
         return nlist
     return [obj]
 
+def makeFace(wires,method=2,cleanup=False):
+    '''makeFace(wires): makes a face from a list of wires, finding which ones are holes'''
+
+    import Part
+    
+    if not isinstance(wires,list):
+        return Part.Face(wires)
+    elif len(wires) == 1:
+        return Part.Face(wires[0])
+
+    wires = wires[:]
+    
+    print "inner wires found"
+    ext = None
+    max_length = 0
+    # cleaning up rubbish in wires
+    if cleanup:
+        for i in range(len(wires)):
+            wires[i] = fcgeo.removeInterVertices(wires[i])
+        print "garbage removed"
+    for w in wires:
+        # we assume that the exterior boundary is that one with
+        # the biggest bounding box
+        if w.BoundBox.DiagonalLength > max_length:
+            max_length = w.BoundBox.DiagonalLength
+            ext = w
+    print "exterior wire",ext
+    wires.remove(ext)
+
+    if method == 1:
+        # method 1: reverse inner wires
+        # all interior wires mark a hole and must reverse
+        # their orientation, otherwise Part.Face fails
+        for w in wires:
+            print "reversing",w
+            w.reverse()
+            print "reversed"
+            # make sure that the exterior wires comes as first in the list
+            wires.insert(0, ext)
+            print "done sorting", wires
+        if wires:
+            return Part.Face(wires)
+    else:
+        # method 2: use the cut method
+        mf = Part.Face(ext)
+        print "external face:",mf
+        for w in wires:
+            f = Part.Face(w)
+            print "internal face:",f
+            mf = mf.cut(f)
+        print "final face:",mf.Faces
+        return mf.Faces[0]
+
 def meshToShape(obj,mark=True):
     '''meshToShape(object,[mark]): turns a mesh into a shape, joining coplanar facets. If
     mark is True (default), non-solid objects will be marked in red'''
@@ -154,33 +224,8 @@ def meshToShape(obj,mark=True):
                 wires = MeshPart.wireFromSegment(mesh, i)
                 print "wire done"
                 print wires
-                if len(wires) > 1:
-                    # a segment can have inner holes
-                    print "inner wires found"
-                    ext = None
-                    max_length = 0
-                    # cleaning up rubbish in wires
-                    for i in range(len(wires)):
-                        wires[i] = fcgeo.removeInterVertices(wires[i])
-                    for w in wires:
-                        # we assume that the exterior boundary is that one with
-                        # the biggest bounding box
-                        if w.BoundBox.DiagonalLength > max_length:
-                            max_length = w.BoundBox.DiagonalLength
-                            ext = w
-                    print "exterior wire",ext
-                    wires.remove(ext)
-                    # all interior wires mark a hole and must reverse
-                    # their orientation, otherwise Part.Face fails
-                    for w in wires:
-                        print "reversing",w
-                        #w.reverse()
-                        print "reversed"
-                    # make sure that the exterior wires comes as first in the list
-                    wires.insert(0, ext)
-                    print "done sorting", wires
                 if wires:
-                    faces.append(Part.Face(wires))
+                    faces.append(makeFace(wires))
                 print "done facing"
             print "faces",faces
 

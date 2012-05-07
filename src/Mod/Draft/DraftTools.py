@@ -74,13 +74,17 @@ MODALT = MODS[Draft.getParam("modalt")]
 
 # sets defaults on first load
 
-if not FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/").HasGroup("Draft"):
+if not FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod").HasGroup("Draft"):
     p = FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/Draft")
     p.SetBool("copymode",1)
     p.SetBool("alwaysSnap",1)
     p.SetBool("showSnapBar",1)
     p.SetUnsigned("constructioncolor",746455039)
     p.SetFloat("textheight",0.2)
+    p.SetInt("precision",4)
+    p.SetInt("gridEvery",10)
+    p.SetFloat("gridSpacing",1.0)
+    p.SetInt("UiMode",1)
 
 #---------------------------------------------------------------------------
 # General functions
@@ -90,7 +94,7 @@ if not FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Mod/").HasGroup("Dra
 def translate(context,text):
     "convenience function for Qt translator"
     return QtGui.QApplication.translate(context, text, None, QtGui.QApplication.UnicodeUTF8).toUtf8()
-		
+
 def msg(text=None,mode=None):
     "prints the given message on the FreeCAD status bar"
     if not text: FreeCAD.Console.PrintMessage("")
@@ -112,7 +116,7 @@ def selectObject(arg):
         if (arg["Type"] == "SoMouseButtonEvent"):
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
                 cursor = arg["Position"]
-                snapped = FreeCADGui.ActiveDocument.ActiveView.getObjectInfo((cursor[0],cursor[1]))
+                snapped = Draft.get3DView().getObjectInfo((cursor[0],cursor[1]))
                 if snapped:
                     obj = FreeCAD.ActiveDocument.getObject(snapped['Object'])
                     FreeCADGui.Selection.addSelection(obj)
@@ -130,7 +134,7 @@ def getPoint(target,args,mobile=False,sym=False,workingplane=True):
     '''
     
     ui = FreeCADGui.draftToolBar
-    view = FreeCADGui.ActiveDocument.ActiveView
+    view = Draft.get3DView()
 
     # get point
     if target.node:
@@ -140,13 +144,13 @@ def getPoint(target,args,mobile=False,sym=False,workingplane=True):
     amod = hasMod(args,MODSNAP)
     cmod = hasMod(args,MODCONSTRAIN)
     point = FreeCADGui.Snapper.snap(args["Position"],lastpoint=last,active=amod,constrain=cmod)
-
+    info = FreeCADGui.Snapper.snapInfo
     # project onto working plane if needed
     if (not plane.weak) and workingplane:
         # working plane was explicitely selected - project onto it
         viewDirection = view.getViewDirection()
-        if FreeCADGui.ActiveDocument.ActiveView.getCameraType() == "Perspective":
-            camera = FreeCADGui.ActiveDocument.ActiveView.getCameraNode()
+        if view.getCameraType() == "Perspective":
+            camera = view.getCameraNode()
             p = camera.getField("position").getValue()
             # view is from camera to point:
             viewDirection = point.sub(Vector(p[0],p[1],p[2]))
@@ -165,11 +169,11 @@ def getPoint(target,args,mobile=False,sym=False,workingplane=True):
         else:
             ui.displayPoint(point, target.node[-1], plane=plane, mask=mask)
     else: ui.displayPoint(point, plane=plane, mask=mask)
-    return point,ctrlPoint
+    return point,ctrlPoint,info
 
 def getSupport(args):
     "returns the supporting object and sets the working plane"
-    snapped = FreeCADGui.ActiveDocument.ActiveView.getObjectInfo((args["Position"][0],args["Position"][1]))
+    snapped = Draft.get3DView().getObjectInfo((args["Position"][0],args["Position"][1]))
     if not snapped: return None
     obj = None
     plane.save()
@@ -230,7 +234,7 @@ class SelectPlane:
         self.doc = FreeCAD.ActiveDocument
         if self.doc:
             FreeCAD.activeDraftCommand = self
-            self.view = FreeCADGui.ActiveDocument.ActiveView
+            self.view = Draft.get3DView()
             self.ui = FreeCADGui.draftToolBar
             self.ui.selectPlaneUi()
             msg(translate("draft", "Pick a face to define the drawing plane\n"))
@@ -249,7 +253,7 @@ class SelectPlane:
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
                 cursor = arg["Position"]
                 doc = FreeCADGui.ActiveDocument
-                info = doc.ActiveView.getObjectInfo((cursor[0],cursor[1]))
+                info = Draft.get3DView().getObjectInfo((cursor[0],cursor[1]))
                 if info:
                     try:
                         shape = doc.getObject(info["Object"]).Object.Shape
@@ -301,6 +305,7 @@ class SelectPlane:
         elif type(arg).__name__ == 'Vector':
             plv = 'd('+str(arg.x)+','+str(arg.y)+','+str(arg.z)+')'
             self.ui.wplabel.setText(plv+suffix)
+        FreeCADGui.Snapper.setGrid()
 
     def finish(self):
         if self.call:
@@ -331,7 +336,7 @@ class Creator:
         self.support = None
         self.commitList = []
         self.doc = FreeCAD.ActiveDocument
-        self.view = FreeCADGui.ActiveDocument.ActiveView
+        self.view = Draft.get3DView()
         self.featureName = name
         if not self.doc:
             self.finish()
@@ -397,7 +402,7 @@ class Line(Creator):
         Creator.Activated(self,name)
         if self.doc:
             self.obj = None
-            self.ui.lineUi()
+            self.ui.lineUi(name)
             self.linetrack = lineTracker()
             self.constraintrack = lineTracker(dotted=True)
             self.obj=self.doc.addObject("Part::Feature",self.featureName)
@@ -420,7 +425,7 @@ class Line(Creator):
             self.linetrack.finalize()
             self.constraintrack.finalize()
         Creator.finish(self)
-        if cont and self.ui:
+        if self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -432,7 +437,7 @@ class Line(Creator):
                 self.finish()
         elif arg["Type"] == "SoLocation2Event":
             # mouse movement detection
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             self.ui.cross(True)
             self.linetrack.p2(point)
         elif arg["Type"] == "SoMouseButtonEvent":
@@ -442,7 +447,7 @@ class Line(Creator):
                     self.finish(False,cont=True)
                 else:
                     if not self.node: self.support = getSupport(arg)
-                    point,ctrlPoint = getPoint(self,arg)
+                    point,ctrlPoint,info = getPoint(self,arg)
                     self.pos = arg["Position"]
                     self.node.append(point)
                     self.linetrack.p1(point)
@@ -522,6 +527,8 @@ class Wire(Line):
                 'Accel' : "W, I",
                 'MenuText': QtCore.QT_TRANSLATE_NOOP("Draft_Wire", "Wire"),
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Wire", "Creates a multiple-point wire. CTRL to snap, SHIFT to constrain")}
+    def Activated(self):
+        Line.Activated(self,name=str(translate("draft","Wire")))
 
     
 class BSpline(Line):
@@ -537,7 +544,7 @@ class BSpline(Line):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_BSpline", "Creates a multiple-point b-spline. CTRL to snap, SHIFT to constrain")}
 
     def Activated(self):
-        Line.Activated(self,"BSpline")
+        Line.Activated(self,name=str(translate("draft","BSpline")))
         if self.doc:
             self.bsplinetrack = bsplineTracker()
 
@@ -547,7 +554,7 @@ class BSpline(Line):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             self.ui.cross(True)
             self.bsplinetrack.update(self.node + [point])
             # Draw constraint tracker line.
@@ -562,7 +569,7 @@ class BSpline(Line):
                     self.finish(False,cont=True)
                 else:
                     if not self.node: self.support = getSupport(arg)
-                    point,ctrlPoint = getPoint(self,arg)
+                    point,ctrlPoint,info = getPoint(self,arg)
                     self.pos = arg["Position"]
                     self.node.append(point)
                     self.drawUpdate(point)
@@ -616,7 +623,7 @@ class BSpline(Line):
 			self.bsplinetrack.finalize()
 			self.constraintrack.finalize()
         Creator.finish(self)
-        if cont and self.ui:
+        if self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -689,10 +696,11 @@ class Rectangle(Creator):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Rectangle", "Creates a 2-point rectangle. CTRL to snap")}
 
     def Activated(self):
-        Creator.Activated(self,"Rectangle")
+        name = str(translate("draft","Rectangle"))
+        Creator.Activated(self,name)
         if self.ui:
             self.refpoint = None
-            self.ui.pointUi()
+            self.ui.pointUi(name)
             self.ui.extUi()
             self.call = self.view.addEventCallback("SoEvent",self.action)
             self.rect = rectangleTracker()
@@ -704,7 +712,7 @@ class Rectangle(Creator):
         if self.ui:
             self.rect.off()
             self.rect.finalize()
-        if cont and self.ui:
+        if self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -735,7 +743,7 @@ class Rectangle(Creator):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
-            point,ctrlPoint = getPoint(self,arg,mobile=True)
+            point,ctrlPoint,info = getPoint(self,arg,mobile=True)
             self.rect.update(point)
             self.ui.cross(True)
         elif arg["Type"] == "SoMouseButtonEvent":
@@ -744,7 +752,7 @@ class Rectangle(Creator):
                     self.finish()
                 else:
                     if not self.node: self.support = getSupport(arg)
-                    point,ctrlPoint = getPoint(self,arg)
+                    point,ctrlPoint,info = getPoint(self,arg)
                     self.appendPoint(point)
 
     def numericInput(self,numx,numy,numz):
@@ -805,7 +813,7 @@ class Arc(Creator):
             self.constraintrack.finalize()
             self.arctrack.finalize()
             self.doc.recompute()
-        if cont and self.ui:
+        if self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -836,7 +844,7 @@ class Arc(Creator):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event":
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             # this is to make sure radius is what you see on screen
             self.ui.cross(True)
             if self.center and fcvec.dist(point,self.center) > 0:
@@ -867,10 +875,9 @@ class Arc(Creator):
                     if not self.altdown:
                         self.ui.cross(False)
                         self.altdown = True
-                    snapped = self.view.getObjectInfo((arg["Position"][0],arg["Position"][1]))
-                    if snapped:
-                        ob = self.doc.getObject(snapped['Object'])
-                        num = int(snapped['Component'].lstrip('Edge'))-1
+                    if info:
+                        ob = self.doc.getObject(info['Object'])
+                        num = int(info['Component'].lstrip('Edge'))-1
                         ed = ob.Shape.Edges[num]
                         if len(self.tangents) == 2:
                             cir = fcgeo.circleFrom3tan(self.tangents[0], self.tangents[1], ed)
@@ -933,7 +940,7 @@ class Arc(Creator):
 
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 # this is to make sure radius is what you see on screen
                 if self.center and fcvec.dist(point,self.center) > 0:
                     viewdelta = fcvec.project(point.sub(self.center), plane.axis)
@@ -1093,14 +1100,15 @@ class Polygon(Creator):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Polygon", "Creates a regular polygon. CTRL to snap, SHIFT to constrain")}
 
     def Activated(self):
-        Creator.Activated(self,"Polygon")
+        name = str(translate("draft","Polygon"))
+        Creator.Activated(self,name)
         if self.ui:
             self.step = 0
             self.center = None
             self.rad = None
             self.tangents = []
             self.tanpoints = []
-            self.ui.pointUi()
+            self.ui.pointUi(name)
             self.ui.extUi()
             self.ui.numFaces.show()
             self.altdown = False
@@ -1119,7 +1127,6 @@ class Polygon(Creator):
             self.constraintrack.finalize()
             self.arctrack.finalize()
             self.doc.recompute()
-        if cont and self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -1129,7 +1136,7 @@ class Polygon(Creator):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event":
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             # this is to make sure radius is what you see on screen
             self.ui.cross(True)
             if self.center and fcvec.dist(point,self.center) > 0:
@@ -1194,7 +1201,7 @@ class Polygon(Creator):
 
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 # this is to make sure radius is what you see on screen
                 if self.center and fcvec.dist(point,self.center) > 0:
                     viewdelta = fcvec.project(point.sub(self.center), plane.axis)
@@ -1282,12 +1289,13 @@ class Text(Creator):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Text", "Creates an annotation. CTRL to snap")}
 
     def Activated(self):
-        Creator.Activated(self,"Text")
+        name = str(translate("draft","Text"))
+        Creator.Activated(self,name)
         if self.ui:
             self.dialog = None
             self.text = ''
             self.ui.sourceCmd = self
-            self.ui.pointUi()
+            self.ui.pointUi(name)
             self.call = self.view.addEventCallback("SoEvent",self.action)
             self.ui.xValue.setFocus()
             self.ui.xValue.selectAll()
@@ -1299,7 +1307,6 @@ class Text(Creator):
         Creator.finish(self)
         if self.ui:
             del self.dialog
-        if cont and self.ui:
             if self.ui.continueMode:
                 self.Activated()
 
@@ -1315,10 +1322,10 @@ class Text(Creator):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,dtrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 self.node.append(point)
                 self.ui.textUi()
                 self.ui.textValue.setFocus()
@@ -1349,19 +1356,20 @@ class Dimension(Creator):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Dimension", "Creates a dimension. CTRL to snap, SHIFT to constrain, ALT to select a segment")}
 
     def Activated(self):
+        name = str(translate("draft","Dimension"))
         if self.cont:
             self.finish()
         elif self.hasMeasures():
-            Creator.Activated(self,"Dimension")
+            Creator.Activated(self,name)
             self.dimtrack = dimTracker()
             self.arctrack = arcTracker()
             self.constraintrack = lineTracker(dotted=True)
             self.createOnMeasures()
             self.finish()
         else:
-            Creator.Activated(self,"Dimension")
+            Creator.Activated(self,name)
             if self.ui:
-                self.ui.pointUi()
+                self.ui.pointUi(name)
                 self.ui.continueCmd.show()
                 self.altdown = False
                 self.call = self.view.addEventCallback("SoEvent",self.action)
@@ -1450,7 +1458,7 @@ class Dimension(Creator):
             shift = hasMod(arg,MODCONSTRAIN)
             if self.arcmode or self.point2:
                 setMod(arg,MODCONSTRAIN,False)
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             self.ui.cross(True)
             if hasMod(arg,MODALT) and (len(self.node)<3):
                 self.ui.cross(False)
@@ -1534,14 +1542,14 @@ class Dimension(Creator):
                     self.dimtrack.update(self.node+[point]+[self.cont])
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 if not self.node: self.support = getSupport(arg)
                 if hasMod(arg,MODALT) and (len(self.node)<3):
-                    snapped = self.view.getObjectInfo((arg["Position"][0],arg["Position"][1]))
-                    if snapped:
-                        ob = self.doc.getObject(snapped['Object'])
-                        if 'Edge' in snapped['Component']:
-                            num = int(snapped['Component'].lstrip('Edge'))-1
+                    print "snapped: ",info
+                    if info:
+                        ob = self.doc.getObject(info['Object'])
+                        if 'Edge' in info['Component']:
+                            num = int(info['Component'].lstrip('Edge'))-1
                             ed = ob.Shape.Edges[num]
                             v1 = ed.Vertexes[0].Point
                             v2 = ed.Vertexes[-1].Point
@@ -1587,6 +1595,7 @@ class Dimension(Creator):
                     if self.dir:
                         point = self.node[0].add(fcvec.project(point.sub(self.node[0]),self.dir))
                     self.node.append(point)
+                print "node",self.node
                 self.dimtrack.update(self.node)
                 if (len(self.node) == 2):
                     self.point2 = self.node[1]
@@ -1638,7 +1647,7 @@ class Modifier:
             return True
         else:
             return False
-        
+
     def Activated(self,name="None"):
         if FreeCAD.activeDraftCommand:
             FreeCAD.activeDraftCommand.finish()
@@ -1653,7 +1662,7 @@ class Modifier:
             self.finish()
         else:
             FreeCAD.activeDraftCommand = self
-            self.view = FreeCADGui.ActiveDocument.ActiveView
+            self.view = Draft.get3DView()
             self.ui = FreeCADGui.draftToolBar
             FreeCADGui.draftToolBar.show()
             rot = self.view.getCameraNode().getField("orientation").getValue()
@@ -1705,7 +1714,8 @@ class Move(Modifier):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Move", "Moves the selected objects between 2 points. CTRL to snap, SHIFT to constrain, ALT to copy")}
     
     def Activated(self):
-        Modifier.Activated(self,"Move")
+        self.name = str(translate("draft","Move"))
+        Modifier.Activated(self,self.name)
         if self.ui:
             if not Draft.getSelection():
                 self.ghost = None
@@ -1721,7 +1731,7 @@ class Move(Modifier):
         if self.call: self.view.removeEventCallback("SoEvent",self.call)
         self.sel = Draft.getSelection()
         self.sel = Draft.getGroupContents(self.sel)
-        self.ui.pointUi()
+        self.ui.pointUi(self.name)
         self.ui.modUi()
         self.ui.xValue.setFocus()
         self.ui.xValue.selectAll()
@@ -1757,7 +1767,7 @@ class Move(Modifier):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             self.linetrack.p2(point)
             self.ui.cross(True)
             # Draw constraint tracker line.
@@ -1774,7 +1784,7 @@ class Move(Modifier):
                 if not hasMod(arg,MODALT): self.finish()
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 if (self.node == []):
                     self.node.append(point)
                     self.ui.isRelative.show()
@@ -1918,7 +1928,7 @@ class Rotate(Modifier):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event":
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             self.ui.cross(True)
             # this is to make sure radius is what you see on screen
             if self.center and fcvec.dist(point,self.center):
@@ -1973,7 +1983,7 @@ class Rotate(Modifier):
                 
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 if self.center and fcvec.dist(point,self.center):
                     viewdelta = fcvec.project(point.sub(self.center), plane.axis)
                     if not fcvec.isNull(viewdelta): point = point.add(fcvec.neg(viewdelta))
@@ -2115,7 +2125,7 @@ class Offset(Modifier):
                 self.finish()
         elif arg["Type"] == "SoLocation2Event":
             self.ui.cross(True)
-            point,ctrlPoint = getPoint(self,arg)
+            point,ctrlPoint,info = getPoint(self,arg)
             if hasMod(arg,MODCONSTRAIN) and self.constrainSeg:
                 dist = fcgeo.findPerpendicular(point,self.shape,self.constrainSeg[1])
                 e = self.shape.Edges[self.constrainSeg[1]]
@@ -2351,8 +2361,14 @@ class Upgrade(Modifier):
                 if (not curves) and (Draft.getType(self.sel[0]) == "Part"):
                     msg(translate("draft", "Found 1 non-parametric objects: draftifying it\n"))
                     Draft.draftify(self.sel[0])
+                else:
+                    msg(translate("draft", "No upgrade available for this object\n"))
+                    self.doc.abortTransaction()
+                    return
             else:
                 msg(translate("draft", "Couldn't upgrade these objects\n"))
+                self.doc.abortTransaction()
+                return
                                         
         elif wires and (not faces) and (not openwires):
             # we have only wires, no faces
@@ -2375,15 +2391,12 @@ class Upgrade(Modifier):
                         msg(translate("draft", "One wire is not planar, upgrade not done\n"))
                         self.nodelete = True
                 for f in faces:
-                    if not curves: 
-                        msg(translate("draft", "Found a closed wire: making a Draft wire\n"))
-                        newob = Draft.makeWire(f.Wire,closed=True)
-                    else:
-                        # if there are curved segments, we do a non-parametric face
-                        msg(translate("draft", "Found a closed wire with curves: making a face\n"))
-                        newob = self.doc.addObject("Part::Feature","Face")
-                        newob.Shape = f
-                        Draft.formatObject(newob,lastob)
+                    # if there are curved segments, we do a non-parametric face
+                    msg(translate("draft", "Found a closed wire: making a face\n"))
+                    newob = self.doc.addObject("Part::Feature","Face")
+                    newob.Shape = f
+                    Draft.formatObject(newob,lastob)
+                    newob.ViewObject.DisplayMode = "Flat Lines"
                         
         elif (len(openwires) == 1) and (not faces) and (not wires):
             # special case, we have only one open wire. We close it, unless it has only 1 edge!"
@@ -2425,12 +2438,9 @@ class Upgrade(Modifier):
             w = Part.Wire(nedges)
             if len(w.Edges) == len(edges):
                 msg(translate("draft", "Found several edges: wiring them\n"))
-                if not curves:
-                    newob = Draft.makeWire(w)
-                else:
-                    newob = self.doc.addObject("Part::Feature","Wire")
-                    newob.Shape = w
-                    Draft.formatObject(newob,lastob)
+                newob = self.doc.addObject("Part::Feature","Wire")
+                newob.Shape = w
+                Draft.formatObject(newob,lastob)
             if not newob:
                 print "no new object found"
                 msg(translate("draft", "Found several non-connected edges: making compound\n"))
@@ -2552,6 +2562,14 @@ class Downgrade(Modifier):
                 
         else:
             # no faces: split wire into single edges
+            onlyedges = True
+            for ob in self.sel:
+                if ob.Shape.ShapeType != "Edge":
+                    onlyedges = False
+            if onlyedges:
+                msg(translate("draft", "No more downgrade possible\n"))
+                self.doc.abortTransaction()
+                return
             msg(translate("draft", "Found only wires: extracting their edges\n"))
             for ob in self.sel:
                 for e in edges:
@@ -2659,7 +2677,7 @@ class Trimex(Modifier):
             self.shift = hasMod(arg,MODCONSTRAIN)
             self.alt = hasMod(arg,MODALT)
             wp = not(self.extrudeMode and self.shift)
-            self.point = getPoint(self,arg,workingplane=wp)[0]
+            self.point,info = getPoint(self,arg,workingplane=wp)[0]
             if hasMod(arg,MODSNAP): self.snapped = None
             else: self.snapped = self.view.getObjectInfo((arg["Position"][0],arg["Position"][1]))
             if self.extrudeMode:
@@ -2872,7 +2890,8 @@ class Scale(Modifier):
                 'ToolTip': QtCore.QT_TRANSLATE_NOOP("Draft_Scale", "Scales the selected objects from a base point. CTRL to snap, SHIFT to constrain, ALT to copy")}
 
     def Activated(self):
-        Modifier.Activated(self,"Scale")
+        self.name = str(translate("draft","Scale"))
+        Modifier.Activated(self,self.name)
         if self.ui:
             if not Draft.getSelection():
                 self.ghost = None
@@ -2888,7 +2907,7 @@ class Scale(Modifier):
         if self.call: self.view.removeEventCallback("SoEvent",self.call)
         self.sel = Draft.getSelection()
         self.sel = Draft.getGroupContents(self.sel)
-        self.ui.pointUi()
+        self.ui.pointUi(self.name)
         self.ui.modUi()
         self.ui.xValue.setFocus()
         self.ui.xValue.selectAll()
@@ -2925,7 +2944,7 @@ class Scale(Modifier):
             if arg["Key"] == "ESCAPE":
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
-            point,ctrlPoint = getPoint(self,arg,sym=True)
+            point,ctrlPoint,info = getPoint(self,arg,sym=True)
             self.linetrack.p2(point)
             self.ui.cross(True)
             # Draw constraint tracker line.
@@ -2946,7 +2965,7 @@ class Scale(Modifier):
                 if not hasMod(arg,MODALT): self.finish()
         elif arg["Type"] == "SoMouseButtonEvent":
             if (arg["State"] == "DOWN") and (arg["Button"] == "BUTTON1"):
-                point,ctrlPoint = getPoint(self,arg,sym=True)
+                point,ctrlPoint,info = getPoint(self,arg,sym=True)
                 if (self.node == []):
                     self.node.append(point)
                     self.ui.isRelative.show()
@@ -3201,7 +3220,7 @@ class Edit(Modifier):
                 self.finish()
         elif arg["Type"] == "SoLocation2Event": #mouse movement detection
             if self.editing != None:
-                point,ctrlPoint = getPoint(self,arg)
+                point,ctrlPoint,info = getPoint(self,arg)
                 # Draw constraint tracker line.
                 if hasMod(arg,MODCONSTRAIN):
                     self.constraintrack.p1(point)
@@ -3219,7 +3238,7 @@ class Edit(Modifier):
                         sel = sel[0]
                         if sel.ObjectName == self.obj.Name:
                             if self.ui.addButton.isChecked():
-                                point,ctrlPoint = getPoint(self,arg)
+                                point,ctrlPoint,info = getPoint(self,arg)
                                 self.pos = arg["Position"]
                                 self.addPoint(point)
                             elif self.ui.delButton.isChecked():
@@ -3643,7 +3662,7 @@ class Point:
             return False
     
     def Activated(self):
-        self.view = FreeCADGui.ActiveDocument.ActiveView
+        self.view = Draft.get3DView()
         self.stack = []
         self.point = None
         # adding 2 callback functions
@@ -3692,6 +3711,29 @@ class ShowSnapBar():
     def Activated(self):
         if hasattr(FreeCADGui,"Snapper"):
             FreeCADGui.Snapper.show()
+
+
+class Draft_Clone():
+    "The Draft Clone command definition"
+
+    def GetResources(self):
+        return {'Pixmap'  : 'Draft_Clone',
+                'Accel' : "C,L",
+                'MenuText': QtCore.QT_TRANSLATE_NOOP("Draft_Clone", "Clone"),
+                'ToolTip' : QtCore.QT_TRANSLATE_NOOP("Draft_Clone", "Clones the selected object(s)")}
+
+    def Activated(self):
+        if FreeCADGui.Selection.getSelection():
+            FreeCAD.ActiveDocument.openTransaction("Clone")
+            for obj in FreeCADGui.Selection.getSelection():
+                Draft.clone(obj)
+            FreeCAD.ActiveDocument.commitTransaction()
+
+    def IsActive(self):
+        if FreeCADGui.Selection.getSelection():
+            return True
+        else:
+            return False
             
 #---------------------------------------------------------------------------
 # Adds the icons & commands to the FreeCAD command manager, and sets defaults
@@ -3725,6 +3767,7 @@ FreeCADGui.addCommand('Draft_DelPoint',DelPoint())
 FreeCADGui.addCommand('Draft_WireToBSpline',WireToBSpline())
 FreeCADGui.addCommand('Draft_Draft2Sketch',Draft2Sketch())
 FreeCADGui.addCommand('Draft_Array',Array())
+FreeCADGui.addCommand('Draft_Clone',Draft_Clone())
 
 # context commands
 FreeCADGui.addCommand('Draft_FinishLine',FinishLine())
