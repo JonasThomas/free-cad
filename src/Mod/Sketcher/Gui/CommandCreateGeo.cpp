@@ -42,7 +42,7 @@
 #include <Gui/View3DInventor.h>
 #include <Gui/View3DInventorViewer.h>
 #include <Gui/SoFCUnifiedSelection.h>
-#include <Inventor/events/SoKeyboardEvent.h>
+
 using namespace std;
 using namespace SketcherGui;
 
@@ -1033,6 +1033,9 @@ public:
 
             }
 
+                //remember the vertex for the next rounds constraint...
+                previousCurve = getHighestCurveIndex() + 1;
+
 
 <<<<<<< HEAD
             else{
@@ -1287,7 +1290,6 @@ public:
             float angle1 = atan2(onSketchPos.fY - CenterPoint.fY,
                                  onSketchPos.fX - CenterPoint.fX) - startAngle;
             float angle2 = angle1 + (angle1 < 0. ? 2 : -2) * M_PI ;
-
             arcAngle = abs(angle1-arcAngle) < abs(angle2-arcAngle) ? angle1 : angle2;
             if (arcAngle > 0)
                 endAngle = startAngle + arcAngle;
@@ -1853,9 +1855,6 @@ CmdSketcherCreateFillet::CmdSketcherCreateFillet()
     sAppModule      = "Sketcher";
     sGroup          = QT_TR_NOOP("Sketcher");
     sMenuText       = QT_TR_NOOP("Create fillet");
-<<<<<<< HEAD
-    sToolTipText    = QT_TR_NOOP("Create a fillet between two lines or at a coincident point");
-=======
     sToolTipText    = QT_TR_NOOP("Create a fillet between two lines or at a coincidental point");
 >>>>>>> master
     sWhatsThis      = sToolTipText;
