@@ -518,10 +518,8 @@ public:
         STATUS_TAN_LINE_Do,
         STATUS_TAN_LINE_Close
 
-
-
-
     };
+
 
     enum SelectLineMode
     {
@@ -529,7 +527,14 @@ public:
         LINE_MODE_Line
     };
 
-       //JT
+    enum ElementType
+    {
+        E_STRAIGHT_LINE,
+        E_ARC_CW,//From the perspective of the user who is drawing
+        E_ARC_CCW// Arcs are actually rendered ccw
+    };
+
+
    public:
         virtual void registerPressedKey(bool pressed, int key)
     {
@@ -590,7 +595,7 @@ public:
                         break;
 
                     case STATUS_TAN_LINE_SEEK_Second:
-                        if(previousArcDirection==0.f){
+                        if(previousElementType==E_STRAIGHT_LINE){
                              EditCurve.resize(2);
                             Mode =STATUS_LINE_SEEK_Second;
                         }
@@ -598,7 +603,7 @@ public:
                         break;
 
                     case STATUS_LINE_SEEK_Second:
-                        if (previousArcDirection!=0.f){
+                        if (previousElementType!=E_STRAIGHT_LINE){
                             EditCurve.resize(3);
                             Mode =STATUS_TAN_LINE_SEEK_Second;
                         }
@@ -661,17 +666,15 @@ public:
                         //The previous element is an arc.
                         const Part::GeomArcOfCircle *arcSeg = dynamic_cast<const Part::GeomArcOfCircle *>(geom);
                         Base::Vector3d tempRadius;
-                        if (previousArcDirection ==-1.0)
+                        if (previousElementType ==E_ARC_CCW){
                            tempRadius=arcSeg->getEndPoint()-arcSeg->getCenter();
-                        else{
-                           assert(previousArcDirection ==1.0);
-                           tempRadius=arcSeg->getStartPoint()-arcSeg->getCenter();
+                           tangent = (Base::Vector3d(0.f,0.f,1.0 ))% tempRadius  ;
                         }
-
-                        //ccw ==-1;
-                        tangent = (Base::Vector3d(0.f,0.f, (float)previousArcDirection *-1.0 ))% tempRadius  ;
-                        //was
-                        //tangent = (Base::Vector3d(0.f,0.f, previousArcDirection)% tempRadius  ;
+                        else{
+                           assert(previousElementType ==E_ARC_CW);
+                           tempRadius=arcSeg->getStartPoint()-arcSeg->getCenter();
+                            tangent = (Base::Vector3d(0.f,0.f,-1.0 ))% tempRadius  ;
+                        }
 
                     }
                     else{
@@ -963,7 +966,7 @@ public:
 
                 if (Mode==STATUS_ARC_Do || Mode==STATUS_ARC_Close || Mode==STATUS_TAN_LINE_Do || Mode==STATUS_TAN_LINE_Close  ){
                     int coincidentPoint;
-                    if (previousArcDirection==1.0)
+                    if (previousElementType==1.0)
                         coincidentPoint=1;
                     else // for -1 and 0 CCW and No arc
                         coincidentPoint=2;
@@ -1076,17 +1079,20 @@ public:
            const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
            if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
                const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
-               previousArcDirection=0.0;
+               previousElementType=E_STRAIGHT_LINE;
                EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
            }
            else if (geom->getTypeId() == Part::GeomArcOfCircle::getClassTypeId()){
                const Part::GeomArcOfCircle *arcSeg = dynamic_cast<const Part::GeomArcOfCircle *>(geom);
-               previousArcDirection=kVec.z;
-               if (kVec.z ==1.0)//cw arc
-                    EditCurve[0] = Base::Vector2D(arcSeg->getStartPoint().x,arcSeg->getStartPoint().y);
-               else //cw arc are rendered in reverse
-                   EditCurve[0] = Base::Vector2D(arcSeg->getEndPoint().x,arcSeg->getEndPoint().y);
 
+               if (kVec.z ==1.0){
+                    EditCurve[0] = Base::Vector2D(arcSeg->getStartPoint().x,arcSeg->getStartPoint().y);
+                    previousElementType=E_ARC_CW;
+               }
+               else{ //cw arc are rendered in reverse
+                   EditCurve[0] = Base::Vector2D(arcSeg->getEndPoint().x,arcSeg->getEndPoint().y);
+                   previousElementType=E_ARC_CCW;
+               }
            }
 
 
@@ -1113,7 +1119,7 @@ protected:
     int firstPoint;
     int firstCurve;
     int previousCurve;
-    float previousArcDirection;
+    ElementType previousElementType;
     std::vector<AutoConstraint> sugConstr1, sugConstr2, sugConstr3;
 
     Base::Vector2D CenterPoint,Distance;
