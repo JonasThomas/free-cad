@@ -1031,28 +1031,26 @@ public:
                  sketchgui->drawEdit(EditCurve);
                  sketchgui->purgeHandler(); // no code after this line, Handler get deleted in ViewProvider
 
-            }
+             }
 
-                //remember the vertex for the next rounds constraint...
-                previousCurve = getHighestCurveIndex() + 1;
+             else{
+ //               //remember the vertex for the next rounds constraint...
+ //               previousCurve = getHighestCurveIndex() + 1;
 
 
-<<<<<<< HEAD
-            else{
-=======
-                // setup for the next line segment
-                // Use updated endPoint as autoconstraints can modify the position
-                const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
-                if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
-                    const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
-                    EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
-                }
-                else
-                    EditCurve[0] = onSketchPos;
->>>>>>> master
 
-            Gui::Command::commitCommand();
-            Gui::Command::updateActive();
+//                // setup for the next line segment
+//                // Use updated endPoint as autoconstraints can modify the position
+//                const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
+//                if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
+//                    const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
+//                    EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
+//                }
+//                else
+//                    EditCurve[0] = onSketchPos;
+
+//            Gui::Command::commitCommand();
+//            Gui::Command::updateActive();
 
             // Add auto constraints
 //           if (sugConstr1.size() > 0)
@@ -1100,10 +1098,10 @@ public:
 
             Mode = STATUS_LINE_SEEK_Second;//LineMode is checked in mousemove and will reset mode to arc
                                                //And will resize Edit Curve to and Arc if required or Tan_line.
-
+             }
         }
 
-        }
+
             return true;
     }
 
@@ -1856,7 +1854,6 @@ CmdSketcherCreateFillet::CmdSketcherCreateFillet()
     sGroup          = QT_TR_NOOP("Sketcher");
     sMenuText       = QT_TR_NOOP("Create fillet");
     sToolTipText    = QT_TR_NOOP("Create a fillet between two lines or at a coincidental point");
->>>>>>> master
     sWhatsThis      = sToolTipText;
     sStatusTip      = sToolTipText;
     sPixmap         = "Sketcher_CreateFillet";
