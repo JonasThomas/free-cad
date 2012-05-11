@@ -654,7 +654,7 @@ public:
                 //Need to determine if the previous element was a line or an arc or ???
                     const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
                     if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
-
+                        assert(previousElementType ==E_STRAIGHT_LINE);
                         const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
                         EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
                         tangent.Set(lineSeg->getEndPoint().x-lineSeg->getStartPoint().x,
@@ -964,11 +964,11 @@ public:
                 //if we don't have a match on the previous curve need to keep going back till find one to make it coincident
 
 
-                if (Mode==STATUS_ARC_Do || Mode==STATUS_ARC_Close || Mode==STATUS_TAN_LINE_Do || Mode==STATUS_TAN_LINE_Close  ){
+                if (Mode==STATUS_ARC_Do || Mode==STATUS_ARC_Close || Mode==STATUS_TAN_LINE_Do || Mode==STATUS_TAN_LINE_Close   ){
                     int coincidentPoint;
-                    if (previousElementType==1.0)
+                    if (previousElementType==E_ARC_CW)
                         coincidentPoint=1;
-                    else // for -1 and 0 CCW and No arc
+                    else // CCW or straight line
                         coincidentPoint=2;
 
 
@@ -1000,45 +1000,52 @@ public:
 
 
                     Gui::Command::doCommand(Gui::Command::Doc,"print App.ActiveDocument.Sketch.Constraints");
-                    }
+                }
+                else if (Mode==STATUS_LINE_Do|| Mode==STATUS_LINE_Close){
 
+                // close the loop by constrain to the first curve pointConstraint
+
+                    Gui::Command::doCommand(Gui::Command::Doc,"App.ActiveDocument.%s.addConstraint(Sketcher.Constraint('Coincident',%i,2,%i,1)) "
+                              ,sketchgui->getObject()->getNameInDocument()
+                              ,previousCurve-1,previousCurve
+                             );
+                }
+
+            }
+            if (Mode == STATUS_LINE_Close|| Mode == STATUS_TAN_LINE_Close||Mode == STATUS_ARC_Close){
+
+                if (Mode == STATUS_LINE_Close){
+                    // close the loop by constrain to the first curve point
+                    Gui::Command::doCommand(Gui::Command::Doc,"App.ActiveDocument.%s.addConstraint(Sketcher.Constraint('Coincident',%i,2,%i,1)) "
+                    ,sketchgui->getObject()->getNameInDocument()
+                    ,previousCurve,firstCurve
+                     );
+
+                    Gui::Command::commitCommand();
+                    Gui::Command::updateActive();
+
+                    if (sugConstr2.size() > 0) {
+                        // exclude any coincidence constraints
+                        std::vector<AutoConstraint> sugConstr;
+                        for (int i=0; i < sugConstr2.size(); i++) {
+                            if (sugConstr2[i].Type != Sketcher::Coincident)
+                                sugConstr.push_back(sugConstr2[i]);
+                        }
+                        createAutoConstraints(sugConstr, getHighestCurveIndex(), Sketcher::end);
+                        sugConstr2.clear();
+                    }
+                }
+                unsetCursor();
+                EditCurve.clear();
+                resetPositionText();
+                sketchgui->drawEdit(EditCurve);
+                sketchgui->purgeHandler(); // no code after this line, Handler get deleted in ViewProvider
 
             }
 
-            if (Mode==STATUS_LINE_Close|| Mode==STATUS_ARC_Close)
-            {
-                // close the loop by constrain to the first curve pointConstraint
-
-                    Gui::Command::doCommand(Gui::Command::Doc,"App.ActiveDocument.%s.addConstraint(Sketcher.Constraint('Coincident',%i,%2,%i,1)) "
-                              ,sketchgui->getObject()->getNameInDocument()
-                              ,previousCurve,firstCurve
-                             );
-
-                Gui::Command::commitCommand();
-                Gui::Command::updateActive();
-
-                 if (sugConstr2.size() > 0) {
-                     // exclude any coincidence constraints
-                     std::vector<AutoConstraint> sugConstr;
-                     for (int i=0; i < sugConstr2.size(); i++) {
-                         if (sugConstr2[i].Type != Sketcher::Coincident)
-                             sugConstr.push_back(sugConstr2[i]);
-                     }
-                     createAutoConstraints(sugConstr, getHighestCurveIndex(), Sketcher::end);
-                     sugConstr2.clear();
-                 }
-
-                 unsetCursor();
-                 EditCurve.clear();
-                 resetPositionText();
-                 sketchgui->drawEdit(EditCurve);
-                 sketchgui->purgeHandler(); // no code after this line, Handler get deleted in ViewProvider
-
-             }
-
-             else{
- //               //remember the vertex for the next rounds constraint...
- //               previousCurve = getHighestCurveIndex() + 1;
+            else{
+//               //remember the vertex for the next rounds constraint...
+//               previousCurve = getHighestCurveIndex() + 1;
 
 
 
@@ -1052,10 +1059,9 @@ public:
 //                else
 //                    EditCurve[0] = onSketchPos;
 
-//            Gui::Command::commitCommand();
-//            Gui::Command::updateActive();
 
-            // Add auto constraints
+
+        // Add auto constraints
 //           if (sugConstr1.size() > 0)
 //            {
 //                createAutoConstraints(sugConstr1, getHighestCurveIndex(), Sketcher::start);
@@ -1069,46 +1075,46 @@ public:
 //            }
 
 
+        Gui::Command::commitCommand();
+        Gui::Command::updateActive();
+        //remember the vertex for the next rounds constraint..
+        previousCurve = getHighestCurveIndex() + 1;
 
-            //remember the vertex for the next rounds constraint..
-            previousCurve = getHighestCurveIndex() + 1;
 
+        // setup for the next line segment
+       // Use updated endPoint as autoconstraints can modify the position
+       const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
+       if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
+           const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
+           previousElementType=E_STRAIGHT_LINE;
+           EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
+       }
+       else if (geom->getTypeId() == Part::GeomArcOfCircle::getClassTypeId()){
+           const Part::GeomArcOfCircle *arcSeg = dynamic_cast<const Part::GeomArcOfCircle *>(geom);
 
-            // setup for the next line segment
-           // Use updated endPoint as autoconstraints can modify the position
-           const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(getHighestCurveIndex());
-           if (geom->getTypeId() == Part::GeomLineSegment::getClassTypeId()) {
-               const Part::GeomLineSegment *lineSeg = dynamic_cast<const Part::GeomLineSegment *>(geom);
-               previousElementType=E_STRAIGHT_LINE;
-               EditCurve[0] = Base::Vector2D(lineSeg->getEndPoint().x, lineSeg->getEndPoint().y);
+           if (kVec.z ==1.0){
+                EditCurve[0] = Base::Vector2D(arcSeg->getStartPoint().x,arcSeg->getStartPoint().y);
+                previousElementType=E_ARC_CW;
            }
-           else if (geom->getTypeId() == Part::GeomArcOfCircle::getClassTypeId()){
-               const Part::GeomArcOfCircle *arcSeg = dynamic_cast<const Part::GeomArcOfCircle *>(geom);
-
-               if (kVec.z ==1.0){
-                    EditCurve[0] = Base::Vector2D(arcSeg->getStartPoint().x,arcSeg->getStartPoint().y);
-                    previousElementType=E_ARC_CW;
-               }
-               else{ //cw arc are rendered in reverse
-                   EditCurve[0] = Base::Vector2D(arcSeg->getEndPoint().x,arcSeg->getEndPoint().y);
-                   previousElementType=E_ARC_CCW;
-               }
+           else{ //cw arc are rendered in reverse
+               EditCurve[0] = Base::Vector2D(arcSeg->getEndPoint().x,arcSeg->getEndPoint().y);
+               previousElementType=E_ARC_CCW;
            }
+       }
 
 
 
 
-            EditCurve.resize(2);
+        EditCurve.resize(2);
 
-            applyCursor();
+        applyCursor();
 
-            Mode = STATUS_LINE_SEEK_Second;//LineMode is checked in mousemove and will reset mode to arc
-                                               //And will resize Edit Curve to and Arc if required or Tan_line.
-             }
-        }
+        Mode = STATUS_LINE_SEEK_Second;//LineMode is checked in mousemove and will reset mode to arc
+                                           //And will resize Edit Curve to and Arc if required or Tan_line.
+         }
 
-
-            return true;
+    }
+    return true;
     }
 
 protected:
