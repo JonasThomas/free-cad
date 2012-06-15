@@ -52,7 +52,7 @@ text27 = translate("StartPage","The <b>Mesh Workbench</b> is used to work with M
 text28 = translate("StartPage","FreeCAD offers you several tools to convert between Mesh and Part objects.")
 text29 = translate("StartPage","Work with Meshes")
 text30 = translate("StartPage","The complete workbench")
-text31 = translate("StartPage","FreeCAD default workbench")
+text31 = translate("StartPage","FreeCAD Complete workbench")
 text32 = translate("StartPage","populated with some of the most commonly used tools.")
 text33 = translate("StartPage","file size:")
 text34 = translate("StartPage","creation time:")
@@ -309,10 +309,10 @@ def getWebExamples():
 def getExamples():
     return """
     <ul>
-        <li><a href="LoadSchenkel.py">""" + text10 + """</a></li>
-        <li><a href="LoadPartDesignExample.py">""" + text11 + """</a></li>
-        <li><a href="LoadDrawingExample.py">""" + text12 + """</a></li>
-        <li><a href="LoadRobotExample.py">""" + text13 + """</a></li>
+        <li><img src="FreeCAD.png" style="width: 16px">&nbsp;<a href="LoadSchenkel.py">""" + text10 + """</a></li>
+        <li><img src="FreeCAD.png" style="width: 16px">&nbsp;<a href="LoadPartDesignExample.py">""" + text11 + """</a></li>
+        <li><img src="FreeCAD.png" style="width: 16px">&nbsp;<a href="LoadDrawingExample.py">""" + text12 + """</a></li>
+        <li><img src="FreeCAD.png" style="width: 16px">&nbsp;<a href="LoadRobotExample.py">""" + text13 + """</a></li>
     </ul>"""
       
 def getLinks():
@@ -366,7 +366,7 @@ def getWorkbenches():
         <li><img src="Complete.png">&nbsp;
             <a onMouseover="show('<h3>""" + text30 +"""</h3> \
             <p>This is the <b>""" + text31 + """</b>, \
-            """ + text32 + """</p>')" 
+            """ + text32 + """</p><img src=complete.jpg>')" 
             onMouseout="show('')" 
             href="DefaultWorkbench.py">""" + text31 + """</a>
         </li>
@@ -399,7 +399,7 @@ def getInfo(filename):
         html += text35 + " " + getLocalTime(s.st_mtime) + "<br/>"
         html += "<span>" + text36 + " " + filename + "</span></p>"
         # get additional info from fcstd files
-        if os.path.splitext(filename)[1] in [".fcstd",".FcStd"]:
+        if os.path.splitext(filename)[1].upper() in [".FCSTD"]:
             zfile=zipfile.ZipFile(filename)
             files=zfile.namelist()
             # check for meta-file if it's really a FreeCAD document
@@ -429,7 +429,12 @@ def getRecentFiles():
         if i < ct:
             mr = rf.GetString("MRU%d" % (i))
             fn = os.path.basename(mr)
-            html += '<li><a '
+            html += '<li>'
+            if mr[-5:].upper() == "FCSTD":
+                html += '<img src="FreeCAD.png" style="width: 16px">&nbsp;'
+            else:
+                html += '<img src="blank.png" style="width: 16px">&nbsp;'
+            html += '<a '
             html += 'onMouseover="show(\''+getInfo(mr)+'\')" '
             html += 'onMouseout="show(\'\')" '
             html += 'href="LoadMRU'+str(i)+'.py">'

@@ -21,12 +21,49 @@
 #*                                                                         *
 #***************************************************************************
 
-import FreeCAD,FreeCADGui,ArchComponent,WorkingPlane,Drawing,math,Draft,ArchCommands
+import FreeCAD,FreeCADGui,ArchComponent,WorkingPlane,math,Draft,ArchCommands, DraftVecUtils
 from FreeCAD import Vector
 from PyQt4 import QtCore
 from pivy import coin
-from draftlibs import fcvec
+from DraftTools import translate
 
+def makeSectionPlane(objectslist=None):
+    """makeSectionPlane([objectslist]) : Creates a Section plane objects including the
+    given objects. If no object is given, the whole document will be considered."""
+    obj = FreeCAD.ActiveDocument.addObject("Part::FeaturePython","Section")
+    _SectionPlane(obj)
+    _ViewProviderSectionPlane(obj.ViewObject)
+    if objectslist:
+        g = []
+        for o in objectslist:
+            if o.isDerivedFrom("Part::Feature"):
+                g.append(o)
+            elif o.isDerivedFrom("App::DocumentObjectGroup"):
+                g.append(o)
+        obj.Objects = g
+    return obj
+
+def makeSectionView(section):
+    """makeSectionView(section) : Creates a Drawing view of the given Section Plane
+    in the active Page object (a new page will be created if none exists"""
+    page = None
+    for o in FreeCAD.ActiveDocument.Objects:
+        if o.isDerivedFrom("Drawing::FeaturePage"):
+            page = o
+            break
+    if not page:
+        page = FreeCAD.ActiveDocument.addObject("Drawing::FeaturePage",str(translate("Arch","Page")))
+        template = Draft.getParam("template")
+        if not template:
+            template = FreeCAD.getResourceDir()+'Mod/Drawing/Templates/A3_Landscape.svg'
+        page.Template = template
+        
+    view = FreeCAD.ActiveDocument.addObject("Drawing::FeatureViewPython","View")
+    page.addObject(view)
+    _ArchDrawingView(view)
+    view.Source = section
+    view.Label = str(translate("Arch","View of"))+" "+section.Name
+    return view
 
 class _CommandSectionPlane:
     "the Arch SectionPlane command definition"
@@ -34,32 +71,21 @@ class _CommandSectionPlane:
         return {'Pixmap'  : 'Arch_SectionPlane',
                 'Accel': "S, P",
                 'MenuText': QtCore.QT_TRANSLATE_NOOP("Arch_SectionPlane","Section Plane"),
-                'ToolTip': QtCore.QT_TRANSLATE_NOOP("Arch_SectionPlane","Adds a section plane object to the document")}
+                'ToolTip': QtCore.QT_TRANSLATE_NOOP("Arch_SectionPlane","Creates a section plane object, including the selected objects")}
 
     def Activated(self):
         sel = FreeCADGui.Selection.getSelection()
-        FreeCAD.ActiveDocument.openTransaction("Section Plane")
-        obj = FreeCAD.ActiveDocument.addObject("Part::FeaturePython","Section")
-        _SectionPlane(obj)
-        _ViewProviderSectionPlane(obj.ViewObject)
-        FreeCAD.ActiveDocument.commitTransaction()
-        g = []
+        ss = "["
         for o in sel:
-            if o.isDerivedFrom("Part::Feature"):
-                g.append(o)
-        obj.Objects = g
-        page = FreeCAD.ActiveDocument.addObject("Drawing::FeaturePage","Page")
-        template = Draft.getParam("template")
-        if not template:
-            template = FreeCAD.getResourceDir()+'Mod/Drawing/Templates/A3_Landscape.svg'
-        page.ViewObject.HintOffsetX = 200
-        page.ViewObject.HintOffsetY = 100
-        page.ViewObject.HintScale = 20
-        page.Template = template
-        view = FreeCAD.ActiveDocument.addObject("Drawing::FeatureViewPython","View")
-        page.addObject(view)
-        _ArchDrawingView(view)
-        view.Source = obj
+            if len(ss) > 1:
+                ss += ","
+            ss += "FreeCAD.ActiveDocument."+o.Name
+        ss += "]"
+        FreeCAD.ActiveDocument.openTransaction(str(translate("Arch","Create Section Plane")))
+        FreeCADGui.doCommand("import Arch")
+        FreeCADGui.doCommand("section = Arch.makeSectionPlane("+ss+")")
+        FreeCADGui.doCommand("Arch.makeSectionView(section)")
+        FreeCAD.ActiveDocument.commitTransaction()
         FreeCAD.ActiveDocument.recompute()
 
 class _SectionPlane:
@@ -67,7 +93,7 @@ class _SectionPlane:
     def __init__(self,obj):
         obj.Proxy = self
         obj.addProperty("App::PropertyLinkList","Objects","Base",
-                        "The objects that must be considered by this section plane. Empty means all document")
+                        str(translate("Arch","The objects that must be considered by this section plane. Empty means all document")))
         self.Type = "SectionPlane"
         
     def execute(self,obj):
@@ -88,7 +114,7 @@ class _ViewProviderSectionPlane(ArchComponent.ViewProviderComponent):
     "A View Provider for Section Planes"
     def __init__(self,vobj):
         vobj.addProperty("App::PropertyLength","DisplaySize","Base",
-                        "The display size of the section plane")
+                        str(translate("Arch","The display size of this section plane")))
         vobj.DisplaySize = 1
         vobj.Transparency = 85
         vobj.LineWidth = 1
@@ -97,6 +123,7 @@ class _ViewProviderSectionPlane(ArchComponent.ViewProviderComponent):
         self.Object = vobj.Object
 
     def getIcon(self):
+        import Arch_rc
         return ":/icons/Arch_SectionPlane_Tree.svg"
 
     def claimChildren(self):
@@ -174,11 +201,11 @@ class _ArchDrawingView:
 
     def updateSVG(self, obj,join=False):
         "encapsulates a svg fragment into a transformation node"
-        import Part
-        from draftlibs import fcgeo
+        import Part, DraftGeomUtils
         if hasattr(obj,"Source"):
             if obj.Source:
                 if obj.Source.Objects:
+                    objs = Draft.getGroupContents(obj.Source.Objects)
                     svg = ''
 
                     # generating SVG
@@ -188,7 +215,7 @@ class _ArchDrawingView:
                         import ArchVRM
                         render = ArchVRM.Renderer()
                         render.setWorkingPlane(obj.Source.Placement)
-                        render.addObjects(obj.Source.Objects)
+                        render.addObjects(objs)
                         render.cut(obj.Source.Shape)
                         svg += render.getViewSVG(linewidth=linewidth)
                         svg += render.getSectionSVG(linewidth=linewidth*2)
@@ -196,17 +223,19 @@ class _ArchDrawingView:
                         
                     else:
                         # render using the Drawing module
+                        import Drawing
                         shapes = []
-                        for o in obj.Source.Objects:
+                        for o in objs:
                             if o.isDerivedFrom("Part::Feature"):
                                 shapes.append(o.Shape)
                         if shapes:
                             base = shape.pop()
                         for sh in shapes:
                             base = base.fuse(sh)
-                        svgf = Drawing.projectToSVG(base,fcvec.neg(direction))
+                        svgf = Drawing.projectToSVG(base,DraftVecUtils.neg(direction))
                         if svgf:
                             svgf = svgf.replace('stroke-width="0.35"','stroke-width="' + str(linewidth) + 'px"')
+                            svgf = svgf.replace('stroke-width:0.01','stroke-width:' + str(linewidth) + 'px')
                         svg += svgf
 
                     result = ''

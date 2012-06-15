@@ -59,6 +59,7 @@
 #include "DemoMode.h"
 #include "TextureMapping.h"
 #include "Utilities.h"
+#include "NavigationStyle.h"
 
 #include <Base/Console.h>
 #include <Base/Exception.h>
@@ -451,6 +452,7 @@ void StdCmdFreezeViews::languageChange()
     }
 }
 
+
 //===========================================================================
 // Std_ToggleClipPlane
 //===========================================================================
@@ -521,8 +523,8 @@ Gui::Action * StdCmdDrawStyle::createAction(void)
     pcAction->setDropDownMenu(true);
     applyCommandData(pcAction);
 
-    QAction* a0 = pcAction->addAction(QString());
-    QAction* a1 = pcAction->addAction(QString());
+    pcAction->addAction(QString());
+    pcAction->addAction(QString());
     _pcAction = pcAction;
     languageChange();
     return pcAction;
@@ -1172,7 +1174,7 @@ StdViewDockUndockFullscreen::StdViewDockUndockFullscreen()
   : Command("Std_ViewDockUndockFullscreen")
 {
     sGroup      = QT_TR_NOOP("Standard-View");
-    sMenuText   = QT_TR_NOOP("Display mode");
+    sMenuText   = QT_TR_NOOP("Document window");
     sToolTipText= QT_TR_NOOP("Display the active view either in fullscreen, in undocked or docked mode");
     sWhatsThis  = "Std_ViewDockUndockFullscreen";
     sStatusTip  = QT_TR_NOOP("Display the active view either in fullscreen, in undocked or docked mode");
@@ -1817,13 +1819,7 @@ void StdViewZoomIn::activated(int iMsg)
     View3DInventor* view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
     if ( view ) {
         View3DInventorViewer* viewer = view->getViewer();
-
-        // send an event to the GL widget to use the internal View3DInventorViewer::zoom() method
-        // do only one step to zoom in 
-        SoMouseButtonEvent e;
-        e.setButton(SoMouseButtonEvent::BUTTON5);
-        e.setState(SoMouseButtonEvent::DOWN);
-        viewer->sendSoEvent(&e);
+        viewer->navigationStyle()->zoomIn();
     }
 }
 
@@ -1857,12 +1853,7 @@ void StdViewZoomOut::activated(int iMsg)
     View3DInventor* view = qobject_cast<View3DInventor*>(getMainWindow()->activeWindow());
     if (view) {
         View3DInventorViewer* viewer = view->getViewer();
-        // send an event to the GL widget to use the internal View3DInventorViewer::zoom() method
-        // do only one step to zoom out 
-        SoMouseButtonEvent e;
-        e.setButton(SoMouseButtonEvent::BUTTON4);
-        e.setState(SoMouseButtonEvent::DOWN);
-        viewer->sendSoEvent(&e);
+        viewer->navigationStyle()->zoomOut();
     }
 }
 

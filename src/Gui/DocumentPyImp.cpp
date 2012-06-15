@@ -32,6 +32,7 @@
 #include <App/Document.h>
 
 #include "Document.h"
+#include "MergeDocuments.h"
 #include "ViewProviderExtern.h"
 
 // inclusion of the generated files (generated out of DocumentPy.xml)
@@ -233,6 +234,22 @@ PyObject*  DocumentPy::activeView(PyObject *args)
 //        Py_Return;
 //    } PY_CATCH;
 //}
+
+PyObject* DocumentPy::mergeProject(PyObject *args)
+{
+    char* filename;
+    if (!PyArg_ParseTuple(args, "s", &filename))     // convert args: Python->C 
+        return NULL;                             // NULL triggers exception 
+
+    PY_TRY {
+        Base::FileInfo fi(filename);
+        Base::ifstream str(fi, std::ios::in | std::ios::binary);
+        App::Document* doc = getDocumentPtr()->getDocument();
+        MergeDocuments md(doc);
+        md.importObjects(str);
+        Py_Return;
+    } PY_CATCH;
+}
 
 Py::Object DocumentPy::getActiveObject(void) const
 {
