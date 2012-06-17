@@ -633,7 +633,7 @@ public:
             case STATUS_LINE_SEEK_Second:
                 EditCurve[1] = onSketchPos;
                 sketchgui->drawEdit(EditCurve);
-                kVec.Set(0.0,0.0,0.0);// We're not dealing with a arc... so loose zero the z-axis
+                kVec.Set(0.0,0.0,0.0);// We're not dealing with a arc... zero the z-axis
                 if (seekAutoConstraint(sugConstr2, onSketchPos, onSketchPos - EditCurve[0])) {
                     renderSuggestConstraintsCursor(sugConstr2);
                     return;
@@ -766,8 +766,8 @@ public:
                         }
                         else
                             arcAngle = abs(endAngle - startAngle);//Don't think this point is ever reached
-                            startAngleDraw= startAngle;
-                            endAngleDraw=endAngle;
+                        startAngleDraw= startAngle;
+                        endAngleDraw=endAngle;
 
                     }
                     else{//cw rotation
