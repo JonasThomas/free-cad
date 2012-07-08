@@ -168,7 +168,7 @@ class Renderer:
 
     def projectFace(self,face):
         "projects a single face on the WP"
-        #print "VRM: projectFace start"
+        #print "VRM: projectFace start: ",len(face[0].Vertexes)," verts, ",len(face[0].Edges)," edges"
         wires = []
         if not face[0].Wires:
             if DEBUG: print "Error: Unable to project face on the WP"
@@ -177,15 +177,16 @@ class Renderer:
         for w in face[0].Wires:
             verts = []
             edges = DraftGeomUtils.sortEdges(w.Edges)
+            #print len(edges)," edges after sorting"
             for e in edges:
                 v = e.Vertexes[0].Point
+                #print v
                 v = self.wp.getLocalCoords(v)
                 verts.append(v)
             verts.append(verts[0])
             if len(verts) > 2:
-                print verts
+                #print "new wire with ",len(verts)
                 wires.append(Part.makePolygon(verts))
-        print "wires:",wires
         try:
             sh = ArchCommands.makeFace(wires)
         except:
@@ -196,7 +197,7 @@ class Renderer:
             vnorm = self.wp.getLocalCoords(norm)
             if vnorm.getAngle(sh.normalAt(0,0)) > 1:
                 sh.reverse()
-            #print "VRM: projectFace end"
+            #print "VRM: projectFace end: ",len(sh.Vertexes)," verts"
             return [sh]+face[1:]
 
     def flattenFace(self,face):
@@ -272,12 +273,10 @@ class Renderer:
                         shapes.append([c]+sh[1:])
                         for f in c.Faces:
                             faces.append([f]+sh[1:])
-                        sec = sol.section(cutface)
-                        if sec.Edges:
-                            wires = DraftGeomUtils.findWires(sec.Edges)
-                            for w in wires:
-                                sec = Part.Face(w)
-                                sections.append([sec,fill])
+                            print "iscoplanar:",f.Vertexes[0].Point,f.normalAt(0,0),cutface.Vertexes[0].Point,cutface.normalAt(0,0)
+                            if DraftGeomUtils.isCoplanar([f,cutface]):
+                                print "COPLANAR"
+                                sections.append([f,fill])
                 self.shapes = shapes
                 self.faces = faces
                 self.sections = sections
@@ -573,19 +572,21 @@ class Renderer:
 
     def getPathData(self,w):
         "Returns a SVG path data string from a 2D wire"
+        def tostr(val):
+            return str(round(val,DraftVecUtils.precision()))
         edges = DraftGeomUtils.sortEdges(w.Edges)
         v = edges[0].Vertexes[0].Point
-        svg = 'M '+ str(v.x) +' '+ str(v.y) + ' '
+        svg = 'M '+ tostr(v.x) +' '+ tostr(v.y) + ' '
         for e in edges:
             if isinstance(e.Curve,Part.Line) or isinstance(e.Curve,Part.BSplineCurve):
                 v = e.Vertexes[-1].Point
-                svg += 'L '+ str(v.x) +' '+ str(v.y) + ' '
+                svg += 'L '+ tostr(v.x) +' '+ tostr(v.y) + ' '
             elif isinstance(e.Curve,Part.Circle):
                 r = e.Curve.Radius
                 v = e.Vertexes[-1].Point
-                svg += 'A '+ str(r) + ' '+ str(r) +' 0 0 1 '+ str(v.x) +' '
-                svg += str(v.y) + ' '
-        svg += 'z '
+                svg += 'A '+ tostr(r) + ' '+ tostr(r) +' 0 0 1 '+ tostr(v.x) +' '
+                svg += tostr(v.y) + ' '
+        svg += 'Z '
         return svg
 
     def getViewSVG(self,linewidth=0.01):
@@ -615,7 +616,7 @@ class Renderer:
 
     def getSectionSVG(self,linewidth=0.02):
         "Returns a SVG fragment from cut faces"
-        if DEBUG: print "Printing ", len(self.sections), " cutfaces"
+        if DEBUG: print "Printing ", len(self.sections), " sections"
         if not self.oriented:
             self.reorient()
         svg = ''
@@ -625,6 +626,7 @@ class Renderer:
                 svg +='<path '
                 svg += 'd="'
                 for w in f[0].Wires:
+                    #print "wire with ",len(w.Vertexes)," verts"
                     svg += self.getPathData(w)
                 svg += '" '
                 svg += 'stroke="#000000" '
