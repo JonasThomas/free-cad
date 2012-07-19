@@ -488,9 +488,11 @@ class DrawSketchHandlerLineSet: public DrawSketchHandler
 {
 public:
     DrawSketchHandlerLineSet()
-      : Mode(STATUS_SEEK_First),LineMode(LINE_MODE_Line),EditCurve(2),
+        : Mode(STATUS_SEEK_First),ElementMode(ELEMENT_MAJOR_MODE_Line),LineMode(LINE_SUB_MODE_Free),ArcMode(ARC_SUB_MODE_Undefined),EditCurve(2),
         firstVertex(-1),firstCurve(-1),previousCurve(-1),previousPosId(-1),
-        isTangent(false) {}
+
+        isTangent(false),
+        isPerpendicular(false){}
     virtual ~DrawSketchHandlerLineSet() {}
     /// mode table
     enum SelectMode {
@@ -500,39 +502,124 @@ public:
         STATUS_Close
     };
 
-    enum SelectLineMode
+
+    enum ElementMajorMode
     {
-        LINE_MODE_Arc,
-        LINE_MODE_Line
+        ELEMENT_MAJOR_MODE_Arc,
+        ELEMENT_MAJOR_MODE_Line
     };
+
+    enum ArcSubMode
+    {
+        ARC_SUB_MODE_Undefined,
+        ARC_SUB_MODE_Tangent,
+        ARC_SUB_MOD_Perpendicular_Z_Plus,
+        ARC_SUB_MOD_Perpendicular_Z_Minus
+
+    };
+    enum LineSubMode
+    {
+        LINE_SUB_MODE_Undefined,
+        LINE_SUB_MODE_Free,
+        LINE_SUB_MODE_Tangent,
+        LINE_SUB_MODE_Perpendicular
+    };
+
 
     virtual void registerPressedKey(bool pressed, int key)
     {
-        if (key == SoKeyboardEvent::A && pressed) {
-            if (LineMode != LINE_MODE_Arc) {
-                Base::Vector2D onSketchPos = EditCurve[isTangent ? 2 : 1];
-                LineMode = LINE_MODE_Arc;
-                if (previousCurve != -1)
-                    isTangent = true;
-                else
+
+        if (pressed){
+            if (key == SoKeyboardEvent::A){ // "A" toggles between line or Arc
+
+                if (previousCurve == -1){
+                    ElementMode = ELEMENT_MAJOR_MODE_Line;
+                    LineMode= LINE_SUB_MODE_Free;
+                    ArcMode=ARC_SUB_MODE_Undefined;
                     isTangent = false;
-                EditCurve.resize(32);
-                mouseMove(onSketchPos); // trigger an update of EditCurve
-            }
-            else {
-                Base::Vector2D onSketchPos = EditCurve[29];
-                LineMode = LINE_MODE_Line;
-                if (previousCurve != -1) {
-                    const Part::Geometry *geom = sketchgui->getSketchObject()->getGeometry(previousCurve);
-                    if (geom->getTypeId() == Part::GeomArcOfCircle::getClassTypeId())
-                        isTangent = true;
-                    else
-                        isTangent = false;
+                    isPerpendicular= false;
+                    Base::Vector2D onSketchPos = EditCurve[1];
                 }
-                EditCurve.resize(isTangent ? 3 : 2);
-                mouseMove(onSketchPos); // trigger an update of EditCurve
+                else {
+                    if (ElementMode == ELEMENT_MAJOR_MODE_Line){
+                        Base::Vector2D onSketchPos = EditCurve[2];
+                        setArcMode(ARC_SUB_MODE_Tangent);
+                        EditCurve.resize(32);
+                        mouseMove(onSketchPos); // trigger an update of EditCurve
+                    }
+                    else if (ElementMode == ELEMENT_MAJOR_MODE_Arc){
+                        Base::Vector2D onSketchPos = EditCurve[isTangent||isPerpendicular ? 2 : 1];
+                        setLineMode(LINE_SUB_MODE_Free);
+                        EditCurve.resize(isTangent||isPerpendicular ? 3 : 2);
+                        mouseMove(onSketchPos); // trigger an update of EditCurve
+                    }
+                    else{
+                        assert (1==2);//we should allways have either a line or an arc
+                    }
+
+                }
             }
+            else if (key == SoKeyboardEvent::F){ // Will toggle one of the sub modes of either Arc or Line
+                // for some reason signal S and D never make it to here.
+                // These are mode switches withing the same subtype
+                if (previousCurve == -1){
+                    setLineMode(LINE_SUB_MODE_Free);
+                    Base::Vector2D onSketchPos = EditCurve[1];
+                }
+                else{
+                    if (ElementMode == ELEMENT_MAJOR_MODE_Arc){
+                        assert (LineMode == LINE_SUB_MODE_Undefined);
+                        switch (ArcMode){
+                            case ARC_SUB_MODE_Tangent:
+                                setArcMode( ARC_SUB_MOD_Perpendicular_Z_Plus);
+                                break;
+                            case ARC_SUB_MOD_Perpendicular_Z_Plus:
+                                setArcMode(ARC_SUB_MOD_Perpendicular_Z_Minus);
+                                break;
+                            case ARC_SUB_MOD_Perpendicular_Z_Minus:
+                                setArcMode(ARC_SUB_MODE_Tangent);
+                                break;
+                            default:
+                                assert(ArcMode== ARC_SUB_MODE_Undefined);//if Assertion fails need to add logic for additional sub modes
+
+                                assert (1==2);// if we got to here we got problems;
+
+                        }
+
+                        Base::Vector2D onSketchPos = EditCurve[isTangent||isPerpendicular ? 2 : 1];
+                        EditCurve.resize(32);
+                        mouseMove(onSketchPos); // trigger an update of EditCurve
+                    }
+                    else if (ElementMode == ELEMENT_MAJOR_MODE_Line){
+                        assert (ArcMode == ARC_SUB_MODE_Undefined);
+                        switch (LineMode){
+                            case LINE_SUB_MODE_Free:
+                                setLineMode(LINE_SUB_MODE_Perpendicular);
+                                break;
+                            case LINE_SUB_MODE_Perpendicular:
+                                setLineMode(LINE_SUB_MODE_Tangent);//TODO IF CONNECT Object is a line, we probably would want this LINE_SUM_MODE_free
+                                break;
+                            case LINE_SUB_MODE_Tangent:
+                                setLineMode(LINE_SUB_MODE_Free);
+                                break;
+                            default:
+                                assert (LineMode == LINE_SUB_MODE_Undefined);// if this assertion fails we probably have a new Linemode to add
+                                assert (1!=1);//This is a logic error here
+                        }
+                        Base::Vector2D onSketchPos = EditCurve[isTangent||isPerpendicular ? 2 : 1];
+                        EditCurve.resize(isTangent||isPerpendicular ? 3 : 2);
+                        mouseMove(onSketchPos); // trigger an update of EditCurve
+                    }
+                    else {
+                        assert (1==2);// this is a fatal error should allways be a line or an arc
+                    }
+
+
+             }
+
+           }
         }
+
     }
 
     virtual void activated(ViewProviderSketch *sketchgui)
@@ -550,15 +637,27 @@ public:
             }
         }
         else if (Mode==STATUS_SEEK_Second){
-            if (LineMode == LINE_MODE_Line) {
-                EditCurve[isTangent ? 2 : 1] = onSketchPos;
+
+
+
+            if (ElementMode==  ELEMENT_MAJOR_MODE_Line) {
+                EditCurve[isTangent || isPerpendicular? 2 : 1] = onSketchPos;
                 if (isTangent) {
                     Base::Vector2D Tangent(dirVec.x,dirVec.y);
                     EditCurve[1].ProjToLine(EditCurve[2] - EditCurve[0], Tangent);
                     EditCurve[1] = EditCurve[0] + EditCurve[1];
                 }
+                else if(isPerpendicular){
+                    Base::Vector3d perVec =  Base::Vector3d(0.f,0.f,1.0f) % dirVec;
+                    perVec.Normalize();
+                    Base::Vector2D Perpendicular(perVec.x,perVec.y);
+                    EditCurve[1].ProjToLine(EditCurve[2] - EditCurve[0], Perpendicular);
+                    EditCurve[1] = EditCurve[0] + EditCurve[1];
+
+
+                }
                 sketchgui->drawEdit(EditCurve);
-                if (!isTangent) {
+                if (!(isTangent || isPerpendicular)) {
                     sugConstr2 = sugConstr1; // Copy the previously found constraints
                     if (seekAutoConstraint(sugConstr2, onSketchPos, onSketchPos - EditCurve[0])) {
                         renderSuggestConstraintsCursor(sugConstr2);
@@ -566,59 +665,119 @@ public:
                     }
                 }
             }
-            else if (LineMode == LINE_MODE_Arc) {
-                Base::Vector2D Tangent(dirVec.x,dirVec.y);
-                float theta = Tangent.GetAngle(onSketchPos - EditCurve[0]);
-                arcRadius = (onSketchPos - EditCurve[0]).Length()/(2.0*sin(theta));
-                // At this point we need a unit normal vector pointing torwards
-                // the center of the arc we are drawing. Derivation of the formula
-                // used here can be found at http://people.richland.edu/james/lecture/m116/matrices/area.html
-                float x1 = EditCurve[0].fX;
-                float y1 = EditCurve[0].fY;
-                float x2 = x1 + Tangent.fX;
-                float y2 = y1 + Tangent.fY;
-                float x3 = onSketchPos.fX;
-                float y3 = onSketchPos.fY;
-                if ((x2*y3-x3*y2)-(x1*y3-x3*y1)+(x1*y2-x2*y1) > 0)
-                    arcRadius *= -1;
+            else if (ElementMode==  ELEMENT_MAJOR_MODE_Arc){
+                //TODO this should be refactored
+                if (ArcMode == ARC_SUB_MODE_Tangent) {
+                    Base::Vector2D Tangent(dirVec.x,dirVec.y);
+                    float theta = Tangent.GetAngle(onSketchPos - EditCurve[0]);
+                    arcRadius = (onSketchPos - EditCurve[0]).Length()/(2.0*sin(theta));
+                    // At this point we need a unit normal vector pointing torwards
+                    // the center of the arc we are drawing. Derivation of the formula
+                    // used here can be found at http://people.richland.edu/james/lecture/m116/matrices/area.html
+                    float x1 = EditCurve[0].fX;
+                    float y1 = EditCurve[0].fY;
+                    float x2 = x1 + Tangent.fX;
+                    float y2 = y1 + Tangent.fY;
+                    float x3 = onSketchPos.fX;
+                    float y3 = onSketchPos.fY;
+                    if ((x2*y3-x3*y2)-(x1*y3-x3*y1)+(x1*y2-x2*y1) > 0)
+                        arcRadius *= -1;
 
-                Base::Vector3d centerVec = dirVec % Base::Vector3d(0.f,0.f,1.0);
-                centerVec.Normalize(); // this step should actually be redundant
+                    Base::Vector3d centerVec = dirVec % Base::Vector3d(0.f,0.f,1.0);
+                    centerVec.Normalize(); // this step should actually be redundant
 
-                CenterPoint = EditCurve[0] + Base::Vector2D(arcRadius * centerVec.x, arcRadius * centerVec.y);
+                    CenterPoint = EditCurve[0] + Base::Vector2D(arcRadius * centerVec.x, arcRadius * centerVec.y);
 
-                float rx = EditCurve[0].fX - CenterPoint.fX;
-                float ry = EditCurve[0].fY - CenterPoint.fY;
+                    float rx = EditCurve[0].fX - CenterPoint.fX;
+                    float ry = EditCurve[0].fY - CenterPoint.fY;
 
-                startAngle = atan2(ry,rx);
+                    startAngle = atan2(ry,rx);
 
-                float rxe = onSketchPos.fX - CenterPoint.fX;
-                float rye = onSketchPos.fY - CenterPoint.fY;
-                float arcAngle = atan2(-rxe*ry + rye*rx, rxe*rx + rye*ry);
-                if (arcRadius >= 0 && arcAngle > 0)
-                    arcAngle -= 2*M_PI;
-                if (arcRadius < 0 && arcAngle < 0)
-                    arcAngle += 2*M_PI;
-                endAngle = startAngle + arcAngle;
+                    float rxe = onSketchPos.fX - CenterPoint.fX;
+                    float rye = onSketchPos.fY - CenterPoint.fY;
+                    float arcAngle = atan2(-rxe*ry + rye*rx, rxe*rx + rye*ry);
+                    if (arcRadius >= 0 && arcAngle > 0)
+                        arcAngle -= 2*M_PI;
+                    if (arcRadius < 0 && arcAngle < 0)
+                        arcAngle += 2*M_PI;
+                    endAngle = startAngle + arcAngle;
 
-                for (int i=1; i <= 29; i++) {
-                    float angle = i*arcAngle/29.0;
-                    float dx = rx * cos(angle) - ry * sin(angle);
-                    float dy = rx * sin(angle) + ry * cos(angle);
-                    EditCurve[i] = Base::Vector2D(CenterPoint.fX + dx, CenterPoint.fY + dy);
+                    for (int i=1; i <= 29; i++) {
+                        float angle = i*arcAngle/29.0;
+                        float dx = rx * cos(angle) - ry * sin(angle);
+                        float dy = rx * sin(angle) + ry * cos(angle);
+                        EditCurve[i] = Base::Vector2D(CenterPoint.fX + dx, CenterPoint.fY + dy);
+                    }
+
+                    EditCurve[30] = CenterPoint;
+                    EditCurve[31] = EditCurve[0];
+
+                    sketchgui->drawEdit(EditCurve);
+                    if (seekAutoConstraint(sugConstr3, onSketchPos, Base::Vector2D(0.f,0.f))) {
+                        renderSuggestConstraintsCursor(sugConstr3);
+                        return;
+                    }
                 }
+                else if (ArcMode == ARC_SUB_MOD_Perpendicular_Z_Plus ||ArcMode == ARC_SUB_MOD_Perpendicular_Z_Minus) {
+                    // dirVec is a 3d Tangential unit vector coming of the prior Arc or Line segment
 
-                EditCurve[30] = CenterPoint;
-                EditCurve[31] = EditCurve[0];
+                    Base::Vector3d perVec =  Base::Vector3d(0.f,0.f,(ArcMode == ARC_SUB_MOD_Perpendicular_Z_Plus ? 1.0f :-1.0f)) % dirVec;
+                    perVec.Normalize();
+                    Base::Vector2D Perpendicular(perVec.x,perVec.y);
+                    float theta = Perpendicular.GetAngle(onSketchPos - EditCurve[0]);
+                    arcRadius = (onSketchPos - EditCurve[0]).Length()/(2.0*sin(theta));
+                    // At this point we need a unit normal vector pointing torwards
+                    // the center of the arc we are drawing. Derivation of the formula
+                    // used here can be found at http://people.richland.edu/james/lecture/m116/matrices/area.html
+                    float x1 = EditCurve[0].fX;
+                    float y1 = EditCurve[0].fY;
+                    float x2 = x1 + Perpendicular.fX;
+                    float y2 = y1 + Perpendicular.fY;
+                    float x3 = onSketchPos.fX;
+                    float y3 = onSketchPos.fY;
+                    if ((x2*y3-x3*y2)-(x1*y3-x3*y1)+(x1*y2-x2*y1) > 0)
+                        arcRadius *= -1;
 
-                sketchgui->drawEdit(EditCurve);
-                if (seekAutoConstraint(sugConstr3, onSketchPos, Base::Vector2D(0.f,0.f))) {
-                    renderSuggestConstraintsCursor(sugConstr3);
-                    return;
+                    Base::Vector3d centerVec = perVec % Base::Vector3d(0.f,0.f,1.0);
+                    centerVec.Normalize(); // this step should actually be redundant
+
+                    CenterPoint = EditCurve[0] + Base::Vector2D(arcRadius * centerVec.x, arcRadius * centerVec.y);
+
+                    float rx = EditCurve[0].fX - CenterPoint.fX;
+                    float ry = EditCurve[0].fY - CenterPoint.fY;
+
+                    startAngle = atan2(ry,rx);
+
+                    float rxe = onSketchPos.fX - CenterPoint.fX;
+                    float rye = onSketchPos.fY - CenterPoint.fY;
+                    float arcAngle = atan2(-rxe*ry + rye*rx, rxe*rx + rye*ry);
+                    if (arcRadius >= 0 && arcAngle > 0)
+                        arcAngle -= 2*M_PI;
+                    if (arcRadius < 0 && arcAngle < 0)
+                        arcAngle += 2*M_PI;
+                    endAngle = startAngle + arcAngle;
+
+                    for (int i=1; i <= 29; i++) {
+                        float angle = i*arcAngle/29.0;
+                        float dx = rx * cos(angle) - ry * sin(angle);
+                        float dy = rx * sin(angle) + ry * cos(angle);
+                        EditCurve[i] = Base::Vector2D(CenterPoint.fX + dx, CenterPoint.fY + dy);
+                    }
+
+                    EditCurve[30] = CenterPoint;
+                    EditCurve[31] = EditCurve[0];
+
+                    sketchgui->drawEdit(EditCurve);
+                    if (seekAutoConstraint(sugConstr3, onSketchPos, Base::Vector2D(0.f,0.f))) {
+                        renderSuggestConstraintsCursor(sugConstr3);
+                        return;
+                    }
                 }
             }
+
         }
         applyCursor();
+
     }
 
     virtual bool pressButton(Base::Vector2D onSketchPos)
@@ -632,23 +791,24 @@ public:
             // (peviousCurve, previousPosId, dirVec, isTangent)
             // in that case we should set firstCurve and firstVertex to -1
             // in order to disable closing the wire
-            if (LineMode == LINE_MODE_Line)
-                EditCurve.resize(isTangent ? 3 : 2);
-            else if (LineMode == LINE_MODE_Arc)
+            if (ElementMode== ELEMENT_MAJOR_MODE_Line)
+                EditCurve.resize(isTangent || isPerpendicular ? 3 : 2);
+            else if (ElementMode = ELEMENT_MAJOR_MODE_Arc)
                 EditCurve.resize(32);
             EditCurve[0] = onSketchPos;
             Mode = STATUS_SEEK_Second;
         }
         else if (Mode==STATUS_SEEK_Second) {
-            if (LineMode == LINE_MODE_Line) {
-                EditCurve[isTangent ? 2 : 1] = onSketchPos;
+
+            if (ElementMode == ELEMENT_MAJOR_MODE_Line) {
+                EditCurve[isTangent || isPerpendicular ? 2 : 1] = onSketchPos;
                 if (isTangent) {
                     Base::Vector2D Tangent(dirVec.x,dirVec.y);
                     EditCurve[1].ProjToLine(EditCurve[2] - EditCurve[0], Tangent);
                     EditCurve[1] = EditCurve[0] + EditCurve[1];
                 }
             }
-            else if (LineMode == LINE_MODE_Arc)
+            else if (ElementMode == ELEMENT_MAJOR_MODE_Arc)
                 EditCurve[29] = onSketchPos; // not so important
             sketchgui->drawEdit(EditCurve);
             applyCursor();
@@ -672,7 +832,7 @@ public:
     {
         if (Mode == STATUS_Do || Mode == STATUS_Close) {
 
-            if (LineMode == LINE_MODE_Line) {
+            if (ElementMode== ELEMENT_MAJOR_MODE_Line) {
                 // open the transaction
                 Gui::Command::openCommand("Add line to sketch wire");
                 // issue the geometry
@@ -681,7 +841,7 @@ public:
                     sketchgui->getObject()->getNameInDocument(),
                     EditCurve[0].fX,EditCurve[0].fY,EditCurve[1].fX,EditCurve[1].fY);
             }
-            else if (LineMode == LINE_MODE_Arc) { // We're dealing with an Arc
+            else if (ElementMode == ELEMENT_MAJOR_MODE_Arc) { // We're dealing with an Arc
                 Gui::Command::openCommand("Add arc to sketch wire");
                 Gui::Command::doCommand(Gui::Command::Doc,
                     "App.ActiveDocument.%s.addGeometry(Part.ArcOfCircle"
@@ -690,16 +850,19 @@ public:
                     CenterPoint.fX, CenterPoint.fY, std::abs(arcRadius),
                     std::min(startAngle,endAngle), std::max(startAngle,endAngle));
             }
+
+
+
             // issue the constraint
             if (previousCurve != -1) {
                 int lastCurve = previousCurve+1;
-                int lastStartPosId = (LineMode == LINE_MODE_Arc && startAngle > endAngle) ? 2 : 1;
-                int lastEndPosId = (LineMode == LINE_MODE_Arc && startAngle > endAngle) ? 1 : 2;
+                int lastStartPosId = ((ElementMode== ELEMENT_MAJOR_MODE_Arc) && startAngle > endAngle) ? 2 : 1;
+                int lastEndPosId = ((ElementMode== ELEMENT_MAJOR_MODE_Arc) && startAngle > endAngle) ? 1 : 2;
                 // in case of a tangency constraint, the coincident constraint is redundant
                 Gui::Command::doCommand(Gui::Command::Doc,
                     "App.ActiveDocument.%s.addConstraint(Sketcher.Constraint('%s',%i,%i,%i,%i)) ",
                     sketchgui->getObject()->getNameInDocument(),
-                    isTangent ? "Tangent" : "Coincident",
+                    isTangent ? "Tangent" : (isPerpendicular ? "Perpendicular" : "Coincident"),
                     previousCurve, previousPosId /* == 2 */, lastCurve, lastStartPosId);
                 if (Mode == STATUS_Close) {
                     int firstGeoId;
@@ -751,7 +914,7 @@ public:
 
                 // remember the vertex for the next rounds constraint..
                 previousCurve = getHighestCurveIndex();
-                previousPosId = (LineMode == LINE_MODE_Arc && startAngle > endAngle) ? 1 : 2;
+                previousPosId = ((ElementMode == ELEMENT_MAJOR_MODE_Arc) && startAngle > endAngle) ? 1 : 2;
 
                 // setup for the next line segment
                 // Use updated endPoint as autoconstraints can modify the position
@@ -765,7 +928,7 @@ public:
                                0.f);
                 }
                 else if (geom->getTypeId() == Part::GeomArcOfCircle::getClassTypeId()) {
-                    assert(LineMode == LINE_MODE_Arc);
+                    assert(ElementMode== ELEMENT_MAJOR_MODE_Arc);
                     const Part::GeomArcOfCircle *arcSeg = dynamic_cast<const Part::GeomArcOfCircle *>(geom);
                     if (startAngle > endAngle) {
                         EditCurve[0] = Base::Vector2D(arcSeg->getStartPoint().x,arcSeg->getStartPoint().y);
@@ -780,20 +943,96 @@ public:
 
                 applyCursor();
                 Mode = STATUS_SEEK_Second;
-                isTangent = (LineMode == LINE_MODE_Arc);
-                LineMode = LINE_MODE_Line;
-                EditCurve.resize(isTangent ? 3 : 2);
+                if (ArcMode == ARC_SUB_MODE_Tangent)
+                    setLineMode(LINE_SUB_MODE_Tangent);
+                else
+                    setLineMode(LINE_SUB_MODE_Free);
+
+
+
+
+                EditCurve.resize(isTangent||isPerpendicular ? 3 : 2);
                 EditCurve[1] = EditCurve[0];
-                if (isTangent)
+
+
+
+
+                if (isTangent||isPerpendicular)
                     EditCurve[2] = EditCurve[0];
                 sketchgui->drawEdit(EditCurve);
             }
         }
         return true;
     }
+
+private:
+    void setArcMode(ArcSubMode ASubMode  )
+    {
+        if (ElementMode == ELEMENT_MAJOR_MODE_Line){
+            ElementMode = ELEMENT_MAJOR_MODE_Arc;
+            LineMode=LINE_SUB_MODE_Undefined;
+        }
+
+        switch (ASubMode){
+            case ARC_SUB_MODE_Tangent:
+                isTangent=true;
+                isPerpendicular=false;
+                break;
+            case ARC_SUB_MOD_Perpendicular_Z_Plus:
+            case ARC_SUB_MOD_Perpendicular_Z_Minus:
+                isTangent=false;
+                isPerpendicular=true;
+                break;
+            default:
+                assert (ASubMode==ARC_SUB_MODE_Undefined);//if it's not this we have a new node to contend with
+                isTangent=false;
+                isPerpendicular=false;
+                break;
+            }
+            ArcMode = ASubMode;
+
+    }
+
+    void setLineMode(LineSubMode LSubMode  )
+    {
+        if (ElementMode == ELEMENT_MAJOR_MODE_Arc){
+            ElementMode = ELEMENT_MAJOR_MODE_Line;
+            ArcMode=ARC_SUB_MODE_Undefined;
+        }
+
+        switch (LSubMode){
+            case LINE_SUB_MODE_Tangent:
+                isTangent=true;
+                isPerpendicular=false;
+                break;
+            case LINE_SUB_MODE_Perpendicular:
+                isTangent=false;
+                isPerpendicular=true;
+                break;
+            case LINE_SUB_MODE_Free:
+                isTangent=false;
+                isPerpendicular=false;
+                break;
+            default:
+                assert(LSubMode==LINE_SUB_MODE_Undefined);//if this fails we have a new line mode to contend with
+                isTangent=false;
+                isPerpendicular=false;
+                break;
+            }
+            LineMode = LSubMode;
+
+    }
+
+
+
+
+
 protected:
     SelectMode Mode;
-    SelectLineMode LineMode;
+    ElementMajorMode ElementMode;
+    LineSubMode LineMode;
+    ArcSubMode  ArcMode;
+    //SelectLineMode LineMode;
 
     std::vector<Base::Vector2D> EditCurve;
     int firstVertex;
@@ -804,7 +1043,7 @@ protected:
 
     Base::Vector2D CenterPoint;
     Base::Vector3d dirVec;
-    bool isTangent;
+    bool isTangent, isPerpendicular;
     float startAngle, endAngle, arcRadius;
 };
 
